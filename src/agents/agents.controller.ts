@@ -5,9 +5,9 @@ import { AgentsService } from './agents.service';
 export class AgentsController {
     constructor(private readonly agentsService: AgentsService) {}
 
-    @Get('liste')
-    async getListeAgents() {
-        return await this.agentsService.getAllAgentsWithPoste();
+    @Get('with-stats')
+    getAgentsWithStats() {
+        return this.agentsService.getAgentsWithTicketStats();
     }
     
 }

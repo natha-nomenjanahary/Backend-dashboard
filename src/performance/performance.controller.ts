@@ -32,12 +32,12 @@ export class PerformanceController {
     return scores;
   }
 
-  @Get('tickets-agents')
-  async getNombreTicketsParAgent() {
-    const agents = await this.agentService.getAllAgents();
-    const tickets = await this.ticketService.getTicketsAvecAgents();
-    return this.performanceService.getNombreTicketsParAgent(agents, tickets);
-  }
+  // @Get('tickets-agents')
+  // async getNombreTicketsParAgent() {
+  //   const agents = await this.agentService.getAllAgents();
+  //   const tickets = await this.ticketService.getTicketsAvecAgents();
+  //   return this.performanceService.getNombreTicketsParAgent(agents, tickets);
+  // }
 
   @Get('tickets-realises-agents')
   async getTicketsRealisesParAgent() {
