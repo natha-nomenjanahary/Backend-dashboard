@@ -22,4 +22,7 @@ export class AgentsService {
           poste: agent.poste,
         }));
     }
+    async getAllAgents(): Promise<Agent[]> {
+        return this.agentRepository.find();
+    }
 }

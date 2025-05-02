@@ -19,6 +19,12 @@ export interface CompteurParAgent {
     nombreTickets: number;
   }
 
+interface Agent {
+    idAgent: number;
+    nom: string;
+    prenom: string;
+}
+
 @Injectable()
 export class PerformanceService {
     calculerScoreParAgent(tickets: Ticket[]): ScoreParAgent[] {
@@ -39,20 +45,49 @@ export class PerformanceService {
         return Array.from(scoreMap.values());
     }
 
-    getNombreTicketsParAgent(tickets: Ticket[]): CompteurParAgent[] {
+    getNombreTicketsParAgent(agents: Agent[], tickets: Ticket[]): CompteurParAgent[] {
         const compteurMap = new Map<number, CompteurParAgent>();
     
-        for (const ticket of tickets) {
-          if (!compteurMap.has(ticket.agentId)) {
-            compteurMap.set(ticket.agentId, {
-              agentId: ticket.agentId,
-              agentName: ticket.agentName,
+        agents.forEach(agent => {
+          if (!compteurMap.has(agent.idAgent)) {
+            compteurMap.set(agent.idAgent, {
+              agentId: agent.idAgent,
+              agentName: agent.nom,
               nombreTickets: 0,
             });
           }
-          compteurMap.get(ticket.agentId)!.nombreTickets += 1;
+        });
+      
+        // Comptage des tickets par agent
+        tickets.forEach(ticket => {
+          if (compteurMap.has(ticket.agentId)) {
+            compteurMap.get(ticket.agentId)!.nombreTickets += 1;
+          }
+        });
+      
+        return Array.from(compteurMap.values());
+      }
+
+    getNombreTicketsParAgentAvecTous(
+        agents: Agent[],
+        tickets: Ticket[],
+      ): CompteurParAgent[] {
+        const compteurMap = new Map<number, CompteurParAgent>();
+    
+        for (const agent of agents) {
+          compteurMap.set(agent.idAgent, {
+            agentId: agent.idAgent,
+            agentName: `${agent.prenom} ${agent.nom}`,
+            nombreTickets: 0,
+          });
+        }
+    
+        for (const ticket of tickets) {
+          if (compteurMap.has(ticket.agentId)) {
+            compteurMap.get(ticket.agentId)!.nombreTickets += 1;
+          }
         }
     
         return Array.from(compteurMap.values());
-      }
+      }  
 }
