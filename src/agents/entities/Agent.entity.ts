@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, OneToMany } from 'typeorm';
 import { Ticket } from '../../tickets/entities/Ticket.entity'
 
 @Entity('tusers')
@@ -21,4 +21,6 @@ export class Agent {
   @Column({ name: 'mail' })
   email: string;
   
+  @OneToMany(() => Ticket, (ticket) => ticket.technicien)
+  tickets: Ticket[];
 }
