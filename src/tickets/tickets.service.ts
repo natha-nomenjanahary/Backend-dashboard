@@ -1,11 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { Ticket } from './entities/Ticket.entity';
 
 @Injectable()
 export class TicketsService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    @InjectRepository(Ticket)
+    private readonly ticketRepository: Repository<Ticket>,
+  ) {}
 
-  //Nbre de tickets par chaque agent 
+  // 1. Tickets avec agents
   async getTicketsAvecAgents(): Promise<{ categorie: string; agentId: number; agentName: string }[]> {
     const rows = await this.dataSource.query(`
       SELECT
@@ -21,7 +27,7 @@ export class TicketsService {
     return rows;
   }
 
-  //Nbre de tickets réalisés par chaque agent
+  // 2. Tickets réalisés
   async getTicketsRealisesParAgent(): Promise<{ agentId: number, agentName: string, total: number }[]> {
     const rows = await this.dataSource.query(`
       SELECT 
@@ -35,5 +41,19 @@ export class TicketsService {
     `);
 
     return rows;
+  }
+
+  // 3. Statut des tickets par agent
+  async getStatutTicketsParAgent() {
+    return await this.ticketRepository
+      .createQueryBuilder('ticket')
+      .select('ticket.technician', 'agentId')
+      .addSelect([
+        `SUM(CASE WHEN ticket.state = 4 THEN 1 ELSE 0 END) AS nbFermes`,
+        `SUM(CASE WHEN ticket.state = 1 THEN 1 ELSE 0 END) AS nbOuverts`,
+        `SUM(CASE WHEN ticket.state = 2 THEN 1 ELSE 0 END) AS nbEnCours`
+      ])
+      .groupBy('ticket.technician')
+      .getRawMany();
   }
 }

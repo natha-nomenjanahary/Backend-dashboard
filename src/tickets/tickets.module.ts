@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
 import { createConnection } from 'typeorm';
@@ -7,6 +8,7 @@ import { Ticket } from './entities/Ticket.entity';
 
 
 @Module({
+  imports: [TypeOrmModule.forFeature([Ticket])],
   controllers: [TicketsController],
   providers: [TicketsService,
     {

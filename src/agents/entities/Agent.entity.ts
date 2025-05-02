@@ -1,4 +1,5 @@
 import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
+import { Ticket } from '../../tickets/entities/Ticket.entity'
 
 @Entity('tusers')
 export class Agent {
@@ -19,4 +20,5 @@ export class Agent {
 
   @Column({ name: 'mail' })
   email: string;
+  
 }
