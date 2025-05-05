@@ -20,6 +20,12 @@ export class Ticket {
   @Column({ name: 'state' })
   statut: string;
 
+  @Column({ name: 'date_create' })
+  dateCreation: Date;
+
+  @Column({ name: 'date_res' })
+  dateResolution: Date;
+
   @ManyToOne(() => Agent, (agent) => agent.tickets)
   @JoinColumn({ name: "technician" })
   agent: Agent;

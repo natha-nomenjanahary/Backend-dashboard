@@ -11,7 +11,7 @@ export class TicketsService {
     private readonly ticketRepository: Repository<Ticket>,
   ) {}
 
-  // 1. Tickets avec agents
+  // 1.Repartition des Tickets 
   async getTicketsAvecAgents(): Promise<{ categorie: string; agentId: number; agentName: string }[]> {
     const rows = await this.dataSource.query(`
       SELECT
