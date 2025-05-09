@@ -2,7 +2,7 @@ export interface AgentStats {
     id: number;
     nom: string;
     poste: string;
-    nombreTickets: string;
+    ticketsResolus: string;
     performance: number;
   }
   

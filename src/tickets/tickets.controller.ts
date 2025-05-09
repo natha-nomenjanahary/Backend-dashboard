@@ -1,11 +1,35 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { TicketsService } from './tickets.service';
+import { DateQueryDto } from './dto/date-query.dto';
 
 @Controller('tickets')
 export class TicketsController {
-    constructor(private readonly ticketService: TicketsService) {}
-    @Get('statuts-par-agent')
-    async getStatutTicketsParAgent() {
-        return this.ticketService.getStatutTicketsParAgent();
-    }
+  constructor(private readonly ticketsService: TicketsService) {}
+
+  //Statut des tickets par jour en 1mois
+  @Get('statut-par-jour')
+  getStatutTicketsParJourExcluantWeekends(@Query() query: DateQueryDto) {
+    return this.ticketsService.getStatutTicketsParJourExcluantWeekends(query.mois, query.annee);
+  }
+
+  //Info de ces tickets par mois
+  @Get('statuts-par-agent')
+  getStatutTicketsParAgent() {
+    return this.ticketsService.getStatutTicketsParAgent();
+  }
+
+  //tickets repartis pour les 5 derniers mois
+  @Get('les-5-dernier')
+  getTicketsRepartisParMois(
+    @Query('mois') mois?: string,
+    @Query('annee') annee?: string,
+  ) {
+    const parsedMois = mois ? parseInt(mois, 10) : undefined;
+    const parsedAnnee = annee ? parseInt(annee, 10) : undefined;
+
+    return this.ticketsService.getTicketsRepartisParMois(parsedMois, parsedAnnee);
+  }
+
 }
+
+

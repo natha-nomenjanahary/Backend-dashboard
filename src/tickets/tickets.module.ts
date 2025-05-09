@@ -8,7 +8,7 @@ import { Ticket } from './entities/Ticket.entity';
 
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Ticket])],
+  imports: [TypeOrmModule.forFeature([Ticket, Agent])],
   controllers: [TicketsController],
   providers: [TicketsService,
     {

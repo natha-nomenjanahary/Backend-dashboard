@@ -1,10 +1,13 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { PerformanceService } from './performance.service';
 import { TicketsService } from '../tickets/tickets.service';
 import { AgentsService } from '../agents/agents.service';
 
-interface TicketWithAgent {
-  categorie: string;
+export interface TicketWithAgent {
+  idTicket: number;
+  date_create: Date;
+  state: number;
+  sousCategorie: number;
   agentId: number;
   agentName: string;
 }
@@ -23,21 +26,27 @@ export class PerformanceController {
     private readonly agentService: AgentsService,
   ) {}
 
-  @Get('scores-agents')
-  async getScoresParAgent(): Promise<AgentScore[]> {
-    const tickets: TicketWithAgent[] = await this.ticketService.getTicketsAvecAgents();
+  //score depend de la complexité pour tous les agents
+  // @Get('scores-agents')
+  // async getScoresParAgent(): Promise<AgentScore[]> {
+  //   const tickets: TicketWithAgent[] = await this.ticketService.getTicketsAvecAgents();
 
-    const scores: AgentScore[] = this.performanceService.calculerScoreParAgent(tickets);
+  //   const scores: AgentScore[] = this.performanceService.calculerScoreParAgent(tickets);
 
-    return scores;
+  //   return scores;
+  // }
+
+  //repartition par mois en pourcentage
+  @Get('tickets-repartis-par-agent')
+  async getRepartitionParAgent(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ) {
+    return this.performanceService.getRepartitionTicketsParAgentParMois(mois, annee);
   }
 
-  // @Get('tickets-agents')
-  // async getNombreTicketsParAgent() {
-  //   const agents = await this.agentService.getAllAgents();
-  //   const tickets = await this.ticketService.getTicketsAvecAgents();
-  //   return this.performanceService.getNombreTicketsParAgent(agents, tickets);
-  // }
+
+
 
   @Get('tickets-realises-agents')
   async getTicketsRealisesParAgent() {

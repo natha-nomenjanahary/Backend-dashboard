@@ -1,13 +1,19 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { AgentsService } from './agents.service';
-import { AgentStats } from './interfaces/agent-stats.interface';
+
 
 @Controller('agents')
 export class AgentsController {
-    constructor(private readonly agentsService: AgentsService) {}
+    constructor(
+        private readonly agentsService: AgentsService,
+    ) {}
 
-    @Get('with-stats')
-    async getAgentsWithTicketStats(): Promise<AgentStats[]> {
-        return this.agentsService.getAgentsWithTicketStats();
+    @Get('agents-stats')
+    async getAgentsStats(
+        @Query('mois') mois?: number,
+        @Query('annee') annee?: number,
+    ) {
+        return this.agentsService.getAgentsWithTicketStats(mois, annee);
     }
+
 }

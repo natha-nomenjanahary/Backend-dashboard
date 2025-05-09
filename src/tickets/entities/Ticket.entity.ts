@@ -7,15 +7,12 @@ export class Ticket {
   @PrimaryGeneratedColumn({ name: 'id' })
   idTicket: number;
 
-  @Column({ name: 'category' })
-  categorie: string;
+  @Column({ name: 'subcat' })
+  sousCategorie: number;
 
   @ManyToOne(() => Agent)
   @JoinColumn({ name: 'technician' })
   technicien: Agent;
-
-  @Column({ name: 'description' })
-  description: string;
 
   @Column({ name: 'state' })
   statut: string;

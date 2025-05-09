@@ -1,93 +1,127 @@
 import { Injectable } from '@nestjs/common';
-import { getPointByCategorie } from './categorie-points.util';
+import { AgentsService } from '../agents/agents.service';
+import { TicketsService } from '../tickets/tickets.service';
+import { SousCategorieService } from '../sous-categories/sous-categories.service';
 
 export interface Ticket {
-    categorie: string;
-    agentId: number;
-    agentName: string;
-}
-
-interface ScoreParAgent {
-    agentId: number;
-    agentName: string;
-    score: number;
-}
-
-export interface CompteurParAgent {
-    agentId: number;
-    agentName: string;
-    nombreTickets: number;
-  }
-
-interface Agent {
+  sousCategorie: { libelle: string }; // Modifié pour correspondre à l'objet attendu
+  agent: {
     idAgent: number;
     nom: string;
     prenom: string;
+  };
+}
+
+interface ScoreParAgent {
+  agentId: number;
+  agentName: string;
+  score: number;
+}
+
+export interface CompteurParAgent {
+  agentId: number;
+  agentName: string;
+  ticketsResolus: number;
+}
+
+interface Agent {
+  idAgent: number;
+  nom: string;
+  prenom: string;
 }
 
 @Injectable()
 export class PerformanceService {
-    calculerScoreParAgent(tickets: Ticket[]): ScoreParAgent[] {
-        const scoreMap = new Map<number, ScoreParAgent>();
-    
-        for (const ticket of tickets) {
-          const points = getPointByCategorie(ticket.categorie);
-          if (!scoreMap.has(ticket.agentId)) {
-            scoreMap.set(ticket.agentId, {
-              agentId: ticket.agentId,
-              agentName: ticket.agentName,
-              score: 0,
-            });
-          }
-          scoreMap.get(ticket.agentId)!.score += points;
-        }
-    
-        return Array.from(scoreMap.values());
+  constructor(
+    private readonly sousCategorieService: SousCategorieService,
+    private readonly agentService: AgentsService,
+    private readonly ticketService: TicketsService,
+  ) {}
+
+  // 1. Score dépend de la complexité pour tous les agents
+  async calculerScoreParAgent(tickets: Ticket[]): Promise<ScoreParAgent[]> {
+    const scoreMap = new Map<number, { nom: string; score: number }>();
+
+    for (const ticket of tickets) {
+      const agentId = ticket.agent?.idAgent;
+      const nomAgent = `${ticket.agent?.nom} ${ticket.agent?.prenom}`.trim();
+      const sousCategorieLibelle = ticket.sousCategorie?.libelle;
+
+      if (!agentId || !sousCategorieLibelle) continue;
+
+      const normalizedName = sousCategorieLibelle.trim().toLowerCase();
+      const points = await this.sousCategorieService.getPointsByName(normalizedName);
+
+      const current = scoreMap.get(agentId);
+
+      if (current) {
+        scoreMap.set(agentId, {
+          nom: current.nom,
+          score: current.score + points,
+        });
+      } else {
+        scoreMap.set(agentId, {
+          nom: nomAgent,
+          score: points,
+        });
+      }
     }
 
-    getNombreTicketsParAgent(agents: Agent[], tickets: Ticket[]): CompteurParAgent[] {
-        const compteurMap = new Map<number, CompteurParAgent>();
-    
-        agents.forEach(agent => {
-          if (!compteurMap.has(agent.idAgent)) {
-            compteurMap.set(agent.idAgent, {
-              agentId: agent.idAgent,
-              agentName: agent.nom,
-              nombreTickets: 0,
-            });
-          }
-        });
-      
-        // Comptage des tickets par agent
-        tickets.forEach(ticket => {
-          if (compteurMap.has(ticket.agentId)) {
-            compteurMap.get(ticket.agentId)!.nombreTickets += 1;
-          }
-        });
-      
-        return Array.from(compteurMap.values());
-      }
+    return Array.from(scoreMap.entries()).map(([id, { nom, score }]) => ({
+      agentId: id,
+      agentName: nom,
+      score,
+    }));
+  }
 
-    getNombreTicketsParAgentAvecTous(
-        agents: Agent[],
-        tickets: Ticket[],
-      ): CompteurParAgent[] {
-        const compteurMap = new Map<number, CompteurParAgent>();
-    
-        for (const agent of agents) {
-          compteurMap.set(agent.idAgent, {
-            agentId: agent.idAgent,
-            agentName: `${agent.prenom} ${agent.nom}`,
-            nombreTickets: 0,
-          });
-        }
-    
-        for (const ticket of tickets) {
-          if (compteurMap.has(ticket.agentId)) {
-            compteurMap.get(ticket.agentId)!.nombreTickets += 1;
-          }
-        }
-    
-        return Array.from(compteurMap.values());
-      }  
+  // 2. Répartition par mois en pourcentage
+  async getRepartitionTicketsParAgentParMois(
+    mois: number = new Date().getMonth() + 1,
+    annee: number = new Date().getFullYear(),
+  ): Promise<
+    {
+      agentId: number;
+      agentName: string;
+      nombre: number;
+      pourcentage: number;
+    }[]
+  > {
+    const today = new Date();
+    const startDate = new Date(annee, mois - 1, 1);
+    const isMoisActuel = mois === today.getMonth() + 1 && annee === today.getFullYear();
+
+    const endDate = isMoisActuel
+      ? new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, 23, 59, 59)
+      : new Date(annee, mois, 0, 23, 59, 59);
+
+    const agents = await this.agentService.getAllAgents();
+    const tickets = await this.ticketService.getTicketsDesAgentsDansIntervalle(startDate, endDate);
+
+    const countMap = new Map<number, number>();
+
+    for (const ticket of tickets) {
+      const agentId = ticket.agentId;
+      if (agentId) {
+        countMap.set(agentId, (countMap.get(agentId) || 0) + 1);
+      }
+    }
+
+    const totalTickets = tickets.length;
+
+    const repartition = agents
+      .filter(agent => countMap.has(agent.idAgent))
+      .map(agent => {
+        const nombre = countMap.get(agent.idAgent)!;
+        const pourcentage = parseFloat(((nombre / totalTickets) * 100).toFixed(2));
+
+        return {
+          agentId: agent.idAgent,
+          agentName: `${agent.nom} ${agent.prenom}`,
+          nombre,
+          pourcentage,
+        };
+      });
+
+    return repartition;
+  }
 }
