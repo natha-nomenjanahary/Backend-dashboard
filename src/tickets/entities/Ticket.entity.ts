@@ -1,21 +1,19 @@
 import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { Agent } from '../../agents/entities/Agent.entity';
-
+import { SousCategorie } from '../../sous-categories/entities/SousCategorie.entity';
 
 @Entity('tincidents')
 export class Ticket {
   @PrimaryGeneratedColumn({ name: 'id' })
   idTicket: number;
 
-  @Column({ name: 'subcat' })
-  sousCategorie: number;
+  @ManyToOne(() => SousCategorie)
+  @JoinColumn({ name: 'subcat' })
+  sousCategorie: SousCategorie;
 
-  @ManyToOne(() => Agent)
-  @JoinColumn({ name: 'technician' })
-  technicien: Agent;
 
   @Column({ name: 'state' })
-  statut: string;
+  statut: number;
 
   @Column({ name: 'date_create' })
   dateCreation: Date;
@@ -25,5 +23,5 @@ export class Ticket {
 
   @ManyToOne(() => Agent, (agent) => agent.tickets)
   @JoinColumn({ name: "technician" })
-  agent: Agent;
+  technicien: Agent;
 }

@@ -8,7 +8,7 @@ import { PerformanceModule } from './performance/performance.module';
 import { Agent } from './agents/entities/Agent.entity';
 import { Ticket } from './tickets/entities/Ticket.entity';
 import { SousCategoriesModule } from './sous-categories/sous-categories.module';
-
+import { SousCategorie } from './sous-categories/entities/SousCategorie.entity'
 
 
 @Module({
@@ -20,7 +20,7 @@ import { SousCategoriesModule } from './sous-categories/sous-categories.module';
       username: 'root', 
       password: '', 
       database: 'base', 
-      entities: [Agent,Ticket], 
+      entities: [Agent,Ticket,SousCategorie], 
       synchronize: false, // Attention : ne pas utiliser en production, cela peut supprimer des données
    }),
     AgentsModule,

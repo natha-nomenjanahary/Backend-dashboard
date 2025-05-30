@@ -5,7 +5,7 @@ import { TicketsService } from './tickets.service';
 import { createConnection } from 'typeorm';
 import { Agent } from '../agents/entities/Agent.entity';
 import { Ticket } from './entities/Ticket.entity';
-
+import { SousCategorie } from '../sous-categories/entities/SousCategorie.entity';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Ticket, Agent])],
@@ -21,7 +21,7 @@ import { Ticket } from './entities/Ticket.entity';
           username: 'root',
           password: '',
           database: 'base',
-          entities: [Agent, Ticket]
+          entities: [Agent, Ticket, SousCategorie]
         });
       },
     },

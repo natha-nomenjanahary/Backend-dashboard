@@ -1,4 +1,5 @@
-import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, OneToMany } from 'typeorm';
+import { Ticket } from '../../tickets/entities/Ticket.entity';
 
 @Entity('tsubcat')
 export class SousCategorie {
@@ -8,6 +9,6 @@ export class SousCategorie {
   @Column({ name: 'name' })
   nom: string;
 
-  @Column()
-  points: number ;
+  @OneToMany(() => Ticket, (ticket) => ticket.sousCategorie)
+  tickets: Ticket[];
 }

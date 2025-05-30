@@ -6,19 +6,19 @@ import { DateQueryDto } from './dto/date-query.dto';
 export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
 
-  //Statut des tickets par jour en 1mois
+  //1.Statut des tickets par jour en 1mois
   @Get('statut-par-jour')
   getStatutTicketsParJourExcluantWeekends(@Query() query: DateQueryDto) {
     return this.ticketsService.getStatutTicketsParJourExcluantWeekends(query.mois, query.annee);
   }
 
-  //Info de ces tickets par mois
+  //2.Info de ces tickets par mois
   @Get('statuts-par-agent')
-  getStatutTicketsParAgent() {
-    return this.ticketsService.getStatutTicketsParAgent();
+  getStatutTicketsParAgent(@Query() query: DateQueryDto) {
+    return this.ticketsService.getStatutTicketsParAgent(query);
   }
 
-  //tickets repartis pour les 5 derniers mois
+  //3.tickets repartis pour les 5 derniers mois
   @Get('les-5-dernier')
   getTicketsRepartisParMois(
     @Query('mois') mois?: string,

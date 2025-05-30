@@ -2,12 +2,14 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { PerformanceService } from './performance.service';
 import { TicketsService } from '../tickets/tickets.service';
 import { AgentsService } from '../agents/agents.service';
+import { SousCategorieService } from '../sous-categories/sous-categories.service';
+import { ScoreParAgent } from '../sous-categories/sous-categories.service';
 
 export interface TicketWithAgent {
   idTicket: number;
   date_create: Date;
   state: number;
-  sousCategorie: number;
+  sousCategorieNom: string;
   agentId: number;
   agentName: string;
 }
@@ -15,28 +17,33 @@ export interface TicketWithAgent {
 interface AgentScore {
   agentId: number;
   agentName: string;
-  score: number;
+  moisActuel: number;
+  moisDernier: number;
 }
 
 @Controller('performance')
 export class PerformanceController {
   constructor(
     private readonly performanceService: PerformanceService,
-    private readonly ticketService: TicketsService,
+    private readonly ticketService: TicketsService, 
     private readonly agentService: AgentsService,
+    private readonly sousCategorieService: SousCategorieService,
   ) {}
 
-  //score depend de la complexité pour tous les agents
-  // @Get('scores-agents')
-  // async getScoresParAgent(): Promise<AgentScore[]> {
-  //   const tickets: TicketWithAgent[] = await this.ticketService.getTicketsAvecAgents();
+  //1.score par agent
+  @Get('scores-agents')
+  async getScoresParAgent(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ): Promise<AgentScore[]> {
+    return this.sousCategorieService.calculerScoreParAgent(
+      mois ? Number(mois) : undefined,
+      annee ? Number(annee) : undefined,
+    );
+  }
 
-  //   const scores: AgentScore[] = this.performanceService.calculerScoreParAgent(tickets);
 
-  //   return scores;
-  // }
-
-  //repartition par mois en pourcentage
+  //2.repartition par mois en pourcentage
   @Get('tickets-repartis-par-agent')
   async getRepartitionParAgent(
     @Query('mois') mois?: number,
@@ -46,10 +53,157 @@ export class PerformanceController {
   }
 
 
-
-
+  //3.ticket realise par agent
   @Get('tickets-realises-agents')
-  async getTicketsRealisesParAgent() {
-    return await this.ticketService.getTicketsRealisesParAgent();
+  async getTicketsRealisesParAgent(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ) {
+    return await this.ticketService.getTicketsRealisesParAgent(mois,annee);
+  }
+
+  //4.Taux de réalisation par mois(total)
+  @Get('tickets-realises-par-mois')
+  async getTicketsRealisesEnUnMois(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.calculerTauxResolutionMensuel(mois,annee);
+  }
+
+  //5. Ces tickets realises par agents(f,m,d)
+  @Get('tickets-realises-info-difficulte-par-agent')
+  async calculerResolutionParAgentParMois(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.calculerResolutionParAgentParMois(mois,annee);
+  }
+
+  //6.  temps de realisation FACILE
+  @Get('temps-realisation-facile')
+  async calculerTempsMoyenResolutionFacileParAgent(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.calculerTempsMoyenResolutionFacileParAgent(mois,annee);
+  }
+
+  //7.  temps de realisation MOYEN
+  @Get('temps-realisation-moyen')
+  async calculerTempsMoyenResolutionMoyenParAgent(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.calculerTempsMoyenResolutionMoyenParAgent(mois,annee);
+  }
+
+  //8.  temps de realisation DIFFICILE
+  @Get('temps-realisation-difficile')
+  async calculerTempsMoyenResolutionDifficileParAgent(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.calculerTempsMoyenResolutionDifficileParAgent(mois,annee);
+  }
+ 
+  //9.  Tableau de forte qctivité
+  @Get('forte-activite')
+  async obtenirTicketsEnCoursDes10MoisPrecedents(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.obtenirTicketsEnCoursDes10MoisPrecedents(mois,annee);
+  }
+
+  //10. liste des tickets realisés
+  @Get('ticket-de')
+  async getTicketsRealisesParNom(
+    @Query('nomComplet') nomComplet: string,
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.getTicketsRealisesParNom(nomComplet, mois, annee);
+  }
+
+  //11.Temps par semaine d'un agent FACILE
+  @Get('temps-semaine-facile')
+  async calculerTempsMoyenParSemainePourAgentTicketFacile(
+    @Query('nomComplet') nomComplet: string,
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.calculerTempsMoyenParSemainePourAgentTicketFacile(nomComplet, mois,annee);
+  }
+
+  //12.Temps par semaine d'un agent MOYEN
+  @Get('temps-semaine-moyen')
+  async calculerTempsMoyenParSemainePourAgentTicketMoyen(
+    @Query('nomComplet') nomComplet: string,
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.calculerTempsMoyenParSemainePourAgentTicketMoyen(nomComplet, mois,annee);
+  }
+
+  //13.Temps par semaine d'un agent DIFFICILE
+  @Get('temps-semaine-difficile')
+  async calculerTempsMoyenParSemainePourAgentTicketDifficile(
+    @Query('nomComplet') nomComplet: string,
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.calculerTempsMoyenParSemainePourAgentTicketDifficile(nomComplet, mois,annee);
+  }
+
+  //14.Taux de realisation d'un agent FACILE
+  @Get('taux-facile')
+  async getStatistiquesTicketsFacilesParAgent(
+    @Query('nomComplet') nomComplet: string,
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.getStatistiquesTicketsFacilesParAgent
+    (nomComplet, mois,annee);
+  }
+  
+  //15.Taux de realisation d'un agent MOYEN
+  @Get('taux-moyen')
+  async getStatistiquesTicketsMoyensParAgent(
+    @Query('nomComplet') nomComplet: string,
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.getStatistiquesTicketsMoyensParAgent
+    (nomComplet, mois,annee);
+  }
+ 
+  //16.Taux de realisation d'un agent DIFFICILE
+  @Get('taux-difficile')
+  async getStatistiquesTicketsDifficilesParAgent(
+    @Query('nomComplet') nomComplet: string,
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.getStatistiquesTicketsDifficilesParAgent
+    (nomComplet, mois,annee);
+  }
+ 
+  //17. Periode forte activité
+  @Get('forte-activite-point')
+  async obtenirPointsTicketsEnCoursDes10MoisPrecedents(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.obtenirPointsTicketsEnCoursDes10MoisPrecedents(mois,annee);
+  }
+
+  //18. Temps de resolution de tous les agnets
+  @Get('temps-de-tout-le-monde')
+  async getTempsMoyenResolutionParComplexiteEtAgent(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.getTempsMoyenResolutionParComplexiteEtAgent(mois,annee);
   }
 }

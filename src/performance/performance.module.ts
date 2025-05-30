@@ -5,9 +5,10 @@ import { TicketsModule } from '../tickets/tickets.module';
 import { AgentsModule } from '../agents/agents.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SousCategoriesModule } from 'src/sous-categories/sous-categories.module';
+import { Ticket } from '../tickets/entities/Ticket.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([]), TicketsModule,AgentsModule,SousCategoriesModule],
+  imports: [TypeOrmModule.forFeature([Ticket]), TicketsModule,AgentsModule,SousCategoriesModule],
   controllers: [PerformanceController],
   providers: [PerformanceService]
 })
