@@ -1050,12 +1050,9 @@ private msToHeureMinute(ms: number): string {
     const dateDebut = new Date(anneeCible, moisCible - 1, 1);
     const dateFin = (mois && annee)
       ? new Date(anneeCible, moisCible, 1)
-      : new Date(aujourdHui.getFullYear(), aujourdHui.getMonth(), aujourdHui.getDate()); // jusqu’à hier
-  
-    
+      : new Date(aujourdHui.getFullYear(), aujourdHui.getMonth(), aujourdHui.getDate());
     const tousLesAgents = await this.agentService.getAllAgents();
-  
-    
+
     const tempsParAgent: Record<number, {
       id: number;
       nomComplet: string;
@@ -1064,7 +1061,6 @@ private msToHeureMinute(ms: number): string {
       difficile: number[];
     }> = {};
   
-    
     for (const agent of tousLesAgents) {
       const idAgent = Number(agent.idAgent);
       tempsParAgent[idAgent] = {
@@ -1076,10 +1072,10 @@ private msToHeureMinute(ms: number): string {
       };
     }
   
-    
     const tickets = await this.ticketRepository
       .createQueryBuilder('ticket')
       .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
+      .leftJoinAndSelect('ticket.technicien', 'technicien') // nécessaire pour accéder à ticket.technicien.idAgent
       .where('ticket.statut = :resolu', { resolu: 3 })
       .andWhere('ticket.dateCreation BETWEEN :debut AND :fin', { debut: dateDebut, fin: dateFin })
       .getMany();
@@ -1087,14 +1083,17 @@ private msToHeureMinute(ms: number): string {
     const pointsParCategorie = new Map<string, number>();
   
     for (const ticket of tickets) {
-      if (!ticket.technicien || !ticket.dateResolution || !ticket.sousCategorie) continue;
+      if (!ticket.technicien || !ticket.technicien.idAgent || !ticket.dateResolution || !ticket.sousCategorie) {
+        continue;
+      }
   
-      const idAgent = Number(ticket.technicien); // ticket.technicien est l'ID
-      if (!tempsParAgent[idAgent]) continue; // Ignore si agent inconnu (au cas où)
+      const idAgent = ticket.technicien.idAgent;
+  
+  
+      const dureeResolution = new Date(ticket.dateResolution).getTime() - new Date(ticket.dateCreation).getTime();
+      if (dureeResolution <= 0) continue;
   
       const nomCategorie = ticket.sousCategorie.nom;
-  
-      
       let points: number;
       if (pointsParCategorie.has(nomCategorie)) {
         points = pointsParCategorie.get(nomCategorie)!;
@@ -1103,27 +1102,20 @@ private msToHeureMinute(ms: number): string {
         pointsParCategorie.set(nomCategorie, points);
       }
   
-      
-      const dureeResolution = new Date(ticket.dateResolution).getTime() - new Date(ticket.dateCreation).getTime();
-  
-     
       if (points === 10) tempsParAgent[idAgent].facile.push(dureeResolution);
       else if (points === 20) tempsParAgent[idAgent].moyen.push(dureeResolution);
       else if (points === 30) tempsParAgent[idAgent].difficile.push(dureeResolution);
     }
   
-    
     const convertirMsEnHeuresMinutes = (ms: number) => {
       const heures = Math.floor(ms / 3600000);
       const minutes = Math.floor((ms % 3600000) / 60000);
       return `${heures}h ${minutes}min`;
     };
   
-    
     const calculerMoyenne = (tableau: number[]) =>
       tableau.length ? tableau.reduce((a, b) => a + b, 0) / tableau.length : 0;
   
-    
     const resultats = Object.values(tempsParAgent)
       .map(agent => ({
         id: agent.id,
@@ -1136,7 +1128,7 @@ private msToHeureMinute(ms: number): string {
   
     return resultats;
   }
-  
+      
   
 
 }
