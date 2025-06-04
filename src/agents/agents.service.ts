@@ -76,8 +76,8 @@ export class AgentsService {
   }
 
   //2.Info sur un agent
-  async getInfoAgentParNom(
-    nomComplet: string,
+  async getInfoAgentParId(
+    idAgent: number,
     mois?: number,
     annee?: number
   ): Promise<{
@@ -89,11 +89,9 @@ export class AgentsService {
     contact: number;
     email: string;
   }> {
-    if (!nomComplet || nomComplet.trim().split(' ').length < 2) {
-      throw new Error('Le nom complet doit contenir au moins un prénom et un nom');
+    if (!idAgent) {
+      throw new Error('L\'ID de l’agent est requis');
     }
-  
-    const [part1, part2] = nomComplet.trim().split(' ');
   
     const today = new Date();
     const targetMois = mois ?? today.getMonth() + 1;
@@ -110,14 +108,11 @@ export class AgentsService {
   
     const agent = await this.agentRepository.findOne({
       relations: ['tickets'],
-      where: [
-        { prenom: part1, nom: part2 },
-        { prenom: part2, nom: part1 } // au cas où l’ordre serait inversé
-      ]
+      where: { idAgent: idAgent }
     });
   
     if (!agent) {
-      throw new Error(`Aucun agent trouvé avec le nom complet : ${nomComplet}`);
+      throw new Error(`Aucun agent trouvé avec l'ID : ${idAgent}`);
     }
   
     const tickets = (agent.tickets || []).filter(ticket => {

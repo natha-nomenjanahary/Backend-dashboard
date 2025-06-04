@@ -19,11 +19,11 @@ export class AgentsController {
 
     //2. Info d'un agent
     @Get('Info')
-    async getInfoAgentParNom(
-        @Query('nomComplet') nomComplet: string,
+    async getInfoAgentParId(
+        @Query('idAgent') idAgent : number,
         @Query('mois') mois?: number,
         @Query('annee') annee?: number,
     ) {
-        return this.agentsService.getInfoAgentParNom(nomComplet, mois, annee);
+        return this.agentsService.getInfoAgentParId(idAgent, mois, annee);
     }
 }

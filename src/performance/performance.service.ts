@@ -34,8 +34,9 @@ private msToHeureMinute(ms: number): string {
   ): Promise<
     {
       agentId: number;
-      agentName: string;
-      nombre: string;
+      name: string;
+      tickets: number;
+      totalTickets: number;
       pourcentage: number;
     }[]
   > {
@@ -73,8 +74,9 @@ private msToHeureMinute(ms: number): string {
 
       return {
         agentId: agent.idAgent,
-        agentName: `${agent.nom} ${agent.prenom}`,
-        nombre: `${count}/${totalTickets}`,
+        name: `${agent.nom} ${agent.prenom}`,
+        tickets: count,
+        totalTickets: totalTickets,
         pourcentage,
       };
     });
@@ -231,17 +233,29 @@ private msToHeureMinute(ms: number): string {
   }
 
   //4. Temps moyen de resolution des tickets FACILES
-  async calculerTempsMoyenResolutionFacileParAgent(
+  async calculerTempsMoyenResolutionParComplexiteParAgent(
     mois?: number,
     annee?: number,
-  ): Promise<
-    {
+  ): Promise<{
+    faciles: {
       agentId: number;
       nomAgent: string;
       nombreTickets: number;
       tempsMoyenHeures: number;
-    }[]
-  > {
+    }[];
+    moyens: {
+      agentId: number;
+      nomAgent: string;
+      nombreTickets: number;
+      tempsMoyenHeures: number;
+    }[];
+    difficiles: {
+      agentId: number;
+      nomAgent: string;
+      nombreTickets: number;
+      tempsMoyenHeures: number;
+    }[];
+  }> {
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth() + 1;
@@ -250,43 +264,46 @@ private msToHeureMinute(ms: number): string {
     const targetMonth = mois ?? currentMonth;
   
     const startDate = new Date(targetYear, targetMonth - 1, 1);
-    let endDate: Date;
-    if (targetYear === currentYear && targetMonth === currentMonth) {
-      endDate = new Date(targetYear, targetMonth - 1, today.getDate() - 1, 23, 59, 59, 999);
-    } else {
-      endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
-    }
+    const endDate =
+      targetYear === currentYear && targetMonth === currentMonth
+        ? new Date(targetYear, targetMonth - 1, today.getDate() - 1, 23, 59, 59, 999)
+        : new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
   
     const tickets = await this.ticketRepository
       .createQueryBuilder('ticket')
       .leftJoinAndSelect('ticket.technicien', 'technicien')
       .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
       .where('ticket.state = :etatResolu', { etatResolu: 3 })
-      .andWhere('ticket.date_res BETWEEN :start AND :end', { start: startDate, end: endDate })
+      .andWhere('ticket.date_res BETWEEN :start AND :end', {
+        start: startDate,
+        end: endDate,
+      })
       .getMany();
   
-    const resultats = new Map<number, {
-      agentId: number;
-      nomAgent: string;
-      totalTemps: number;
-      nombreTickets: number;
-    }>();
+    const regroupement = {
+      faciles: new Map<number, { agentId: number; nomAgent: string; totalTemps: number; nombreTickets: number }>(),
+      moyens: new Map<number, { agentId: number; nomAgent: string; totalTemps: number; nombreTickets: number }>(),
+      difficiles: new Map<number, { agentId: number; nomAgent: string; totalTemps: number; nombreTickets: number }>(),
+    };
   
     for (const ticket of tickets) {
       const agent = ticket.technicien;
       const sousCategorie = ticket.sousCategorie;
-  
       if (!agent || !sousCategorie) continue;
   
       const points = await this.sousCategorieService.getPointsByName(sousCategorie.nom);
-      if (points !== 10) continue; 
-  
       const dateDebut = new Date(ticket.dateCreation);
       const dateFin = new Date(ticket.dateResolution);
       const tempsResolutionHeures = (dateFin.getTime() - dateDebut.getTime()) / (1000 * 60 * 60);
   
-      if (!resultats.has(agent.idAgent)) {
-        resultats.set(agent.idAgent, {
+      let map: Map<number, any> | null = null;
+      if (points === 10) map = regroupement.faciles;
+      else if (points === 20) map = regroupement.moyens;
+      else if (points === 30) map = regroupement.difficiles;
+      else continue;
+  
+      if (!map.has(agent.idAgent)) {
+        map.set(agent.idAgent, {
           agentId: agent.idAgent,
           nomAgent: agent.prenom,
           totalTemps: 0,
@@ -294,173 +311,26 @@ private msToHeureMinute(ms: number): string {
         });
       }
   
-      const donnees = resultats.get(agent.idAgent)!;
+      const donnees = map.get(agent.idAgent);
       donnees.totalTemps += tempsResolutionHeures;
       donnees.nombreTickets += 1;
     }
   
-    return Array.from(resultats.values()).map(res => ({
-      agentId: res.agentId,
-      nomAgent: res.nomAgent,
-      nombreTickets: res.nombreTickets,
-      tempsMoyenHeures: res.nombreTickets > 0 ? parseFloat((res.totalTemps / res.nombreTickets).toFixed(2)) : 0,
-    }));
+    const formatter = (map: Map<number, any>) =>
+      Array.from(map.values()).map(d => ({
+        agentId: d.agentId,
+        nomAgent: d.nomAgent,
+        nombreTickets: d.nombreTickets,
+        tempsMoyenHeures: d.nombreTickets > 0 ? parseFloat((d.totalTemps / d.nombreTickets).toFixed(2)) : 0,
+      }));
+  
+    return {
+      faciles: formatter(regroupement.faciles),
+      moyens: formatter(regroupement.moyens),
+      difficiles: formatter(regroupement.difficiles),
+    };
   }
   
-  //5. Temps moyen de resolution des tickets MOYENS
-  async calculerTempsMoyenResolutionMoyenParAgent(
-    mois?: number,
-    annee?: number,
-  ): Promise<
-    {
-      agentId: number;
-      nomAgent: string;
-      nombreTickets: number;
-      tempsMoyenHeures: number;
-    }[]
-  > {
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth() + 1;
-  
-    const targetYear = annee ?? currentYear;
-    const targetMonth = mois ?? currentMonth;
-  
-    const startDate = new Date(targetYear, targetMonth - 1, 1);
-    let endDate: Date;
-    if (targetYear === currentYear && targetMonth === currentMonth) {
-      endDate = new Date(targetYear, targetMonth - 1, today.getDate() - 1, 23, 59, 59, 999);
-    } else {
-      endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
-    }
-  
-    const tickets = await this.ticketRepository
-      .createQueryBuilder('ticket')
-      .leftJoinAndSelect('ticket.technicien', 'technicien')
-      .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
-      .where('ticket.state = :etatResolu', { etatResolu: 3 })
-      .andWhere('ticket.date_res BETWEEN :start AND :end', { start: startDate, end: endDate })
-      .getMany();
-  
-    const resultats = new Map<number, {
-      agentId: number;
-      nomAgent: string;
-      totalTemps: number;
-      nombreTickets: number;
-    }>();
-  
-    for (const ticket of tickets) {
-      const agent = ticket.technicien;
-      const sousCategorie = ticket.sousCategorie;
-  
-      if (!agent || !sousCategorie) continue;
-  
-      const points = await this.sousCategorieService.getPointsByName(sousCategorie.nom);
-      if (points !== 20) continue; 
-  
-      const dateDebut = new Date(ticket.dateCreation);
-      const dateFin = new Date(ticket.dateResolution);
-      const tempsResolutionHeures = (dateFin.getTime() - dateDebut.getTime()) / (1000 * 60 * 60);
-  
-      if (!resultats.has(agent.idAgent)) {
-        resultats.set(agent.idAgent, {
-          agentId: agent.idAgent,
-          nomAgent: agent.prenom,
-          totalTemps: 0,
-          nombreTickets: 0,
-        });
-      }
-  
-      const donnees = resultats.get(agent.idAgent)!;
-      donnees.totalTemps += tempsResolutionHeures;
-      donnees.nombreTickets += 1;
-    }
-  
-    return Array.from(resultats.values()).map(res => ({
-      agentId: res.agentId,
-      nomAgent: res.nomAgent,
-      nombreTickets: res.nombreTickets,
-      tempsMoyenHeures: res.nombreTickets > 0 ? parseFloat((res.totalTemps / res.nombreTickets).toFixed(2)) : 0,
-    }));
-  }
-  
-  //6. Temps moyen de resolution des tickets MOYENS
-  async calculerTempsMoyenResolutionDifficileParAgent(
-    mois?: number,
-    annee?: number,
-  ): Promise<
-    {
-      agentId: number;
-      nomAgent: string;
-      nombreTickets: number;
-      tempsMoyenHeures: number;
-    }[]
-  > {
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth() + 1;
-  
-    const targetYear = annee ?? currentYear;
-    const targetMonth = mois ?? currentMonth;
-  
-    const startDate = new Date(targetYear, targetMonth - 1, 1);
-    let endDate: Date;
-    if (targetYear === currentYear && targetMonth === currentMonth) {
-      endDate = new Date(targetYear, targetMonth - 1, today.getDate() - 1, 23, 59, 59, 999);
-    } else {
-      endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
-    }
-  
-    const tickets = await this.ticketRepository
-      .createQueryBuilder('ticket')
-      .leftJoinAndSelect('ticket.technicien', 'technicien')
-      .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
-      .where('ticket.state = :etatResolu', { etatResolu: 3 })
-      .andWhere('ticket.date_res BETWEEN :start AND :end', { start: startDate, end: endDate })
-      .getMany();
-  
-    const resultats = new Map<number, {
-      agentId: number;
-      nomAgent: string;
-      totalTemps: number;
-      nombreTickets: number;
-    }>();
-  
-    for (const ticket of tickets) {
-      const agent = ticket.technicien;
-      const sousCategorie = ticket.sousCategorie;
-  
-      if (!agent || !sousCategorie) continue;
-  
-      const points = await this.sousCategorieService.getPointsByName(sousCategorie.nom);
-      if (points !== 30) continue; 
-  
-      const dateDebut = new Date(ticket.dateCreation);
-      const dateFin = new Date(ticket.dateResolution);
-      const tempsResolutionHeures = (dateFin.getTime() - dateDebut.getTime()) / (1000 * 60 * 60);
-  
-      if (!resultats.has(agent.idAgent)) {
-        resultats.set(agent.idAgent, {
-          agentId: agent.idAgent,
-          nomAgent: agent.prenom,
-          totalTemps: 0,
-          nombreTickets: 0,
-        });
-      }
-  
-      const donnees = resultats.get(agent.idAgent)!;
-      donnees.totalTemps += tempsResolutionHeures;
-      donnees.nombreTickets += 1;
-    }
-  
-    return Array.from(resultats.values()).map(res => ({
-      agentId: res.agentId,
-      nomAgent: res.nomAgent,
-      nombreTickets: res.nombreTickets,
-      tempsMoyenHeures: res.nombreTickets > 0 ? parseFloat((res.totalTemps / res.nombreTickets).toFixed(2)) : 0,
-    }));
-  }
-
   //7.Identification des periodes de forte activité
   async obtenirTicketsEnCoursDes10MoisPrecedents(mois?: number, annee?: number): Promise<
   {
@@ -538,11 +408,15 @@ private msToHeureMinute(ms: number): string {
   }
 
   //8. repartition par mois des tickets pour voir le temps de realisation(FACILE)
-  async calculerTempsMoyenParSemainePourAgentTicketFacile(
-    nomComplet: string,
+  async calculerTempsMoyenParSemaineParComplexitePourAgent(
+    idAgent: number,
     mois?: number,
     annee?: number,
-  ): Promise<{ semaineDebut: string; tempsMoyenHeures: number }[]> {
+  ): Promise<{
+    faciles: { semaine: number; tempsMoyenHeures: string }[];
+    moyens: { semaine: number; tempsMoyenHeures: string }[];
+    difficiles: { semaine: number; tempsMoyenHeures: string }[];
+  }> {
     const aujourdHui = new Date();
     const moisCible = mois ?? aujourdHui.getMonth() + 1;
     const anneeCible = annee ?? aujourdHui.getFullYear();
@@ -556,224 +430,98 @@ private msToHeureMinute(ms: number): string {
       ? new Date(aujourdHui.getFullYear(), aujourdHui.getMonth(), aujourdHui.getDate() - 1, 23, 59, 59)
       : new Date(anneeCible, moisCible, 0, 23, 59, 59);
   
-    const [nom, prenom] = nomComplet.trim().split(' ');
-    const agent = await this.agentService.getAgentByPrenomEtNom(prenom, nom);
-      
-    const ticketsTrouves = await this.ticketRepository
+    const tickets = await this.ticketRepository
       .createQueryBuilder('ticket')
       .leftJoinAndSelect('ticket.technicien', 'technicien')
       .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
       .where('ticket.state = 3')
-      .andWhere('ticket.technician = :idAgent', { idAgent: agent!.idAgent })
+      .andWhere('ticket.technician = :idAgent', { idAgent })
       .andWhere('ticket.date_create BETWEEN :debut AND :fin', {
         debut: dateDebut,
         fin: dateFin,
       })
       .getMany();
   
-    const ticketsFaciles: Ticket[] = [];
-    for (const ticket of ticketsTrouves) {
+    const categories = {
+      faciles: new Map<number, { totalHeures: number; nombre: number }>(),
+      moyens: new Map<number, { totalHeures: number; nombre: number }>(),
+      difficiles: new Map<number, { totalHeures: number; nombre: number }>(),
+    };
+  
+    for (const ticket of tickets) {
       const points = await this.sousCategorieService.getPointsByName(ticket.sousCategorie.nom);
-      if (points === 10) {
-        ticketsFaciles.push(ticket);
-      }
-    }
-  
-    const resultatsParSemaine = new Map<string, { totalHeures: number; nombre: number }>();
-  
-    for (const ticket of ticketsFaciles) {
       const debut = new Date(ticket.dateCreation);
       const fin = new Date(ticket.dateResolution);
       const dureeHeures = (fin.getTime() - debut.getTime()) / (1000 * 60 * 60);
+      const semaine = this.getNumeroSemaine(fin);
   
-      const jour = fin.getDay();
-      const decalage = jour === 0 ? -6 : 1 - jour;
-      const debutSemaine = new Date(fin);
-      debutSemaine.setDate(fin.getDate() + decalage);
-      debutSemaine.setHours(0, 0, 0, 0);
+      let mapCible: Map<number, { totalHeures: number; nombre: number }> | undefined;
   
-      const cleSemaine = debutSemaine.toISOString().slice(0, 10);
-      const existant = resultatsParSemaine.get(cleSemaine) || {
-        totalHeures: 0,
-        nombre: 0,
-      };
-      existant.totalHeures += dureeHeures;
-      existant.nombre += 1;
-      resultatsParSemaine.set(cleSemaine, existant);
+      if (points === 10) mapCible = categories.faciles;
+      else if (points === 20) mapCible = categories.moyens;
+      else if (points === 30) mapCible = categories.difficiles;
+  
+      if (mapCible) {
+        const current = mapCible.get(semaine) ?? { totalHeures: 0, nombre: 0 };
+        current.totalHeures += dureeHeures;
+        current.nombre += 1;
+        mapCible.set(semaine, current);
+      }
     }
   
-    return Array.from(resultatsParSemaine.entries())
-      .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
-      .map(([semaineDebut, { totalHeures, nombre }]) => ({
-        semaineDebut,
-        tempsMoyenHeures: parseFloat((totalHeures / nombre).toFixed(2)),
-      }));
+    const formatter = (map: Map<number, { totalHeures: number; nombre: number }>) =>
+      Array.from(map.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([semaine, { totalHeures, nombre }]) => ({
+          semaine,
+          tempsMoyenHeures: this.convertirEnHeuresMinutes(totalHeures / nombre),
+        }));
+  
+    return {
+      faciles: formatter(categories.faciles),
+      moyens: formatter(categories.moyens),
+      difficiles: formatter(categories.difficiles),
+    };
   }
-  //9. repartition par mois des tickets pour voir le temps de realisation(MOYEN)
-  async calculerTempsMoyenParSemainePourAgentTicketMoyen(
-    nomComplet: string,
-    mois?: number,
-    annee?: number,
-  ): Promise<{ semaineDebut: string; tempsMoyenHeures: number }[]> {
-    const aujourdHui = new Date();
-    const moisCible = mois ?? aujourdHui.getMonth() + 1;
-    const anneeCible = annee ?? aujourdHui.getFullYear();
   
-    const estMoisCourant =
-      moisCible === aujourdHui.getMonth() + 1 &&
-      anneeCible === aujourdHui.getFullYear();
+  // Fonction utilitaire : retourne le numéro ISO de la semaine
+  private getNumeroSemaine(date: Date): number {
+    const debutMois = new Date(date.getFullYear(), date.getMonth(), 1);
+    const jourDebutMois = debutMois.getDay() || 5; 
   
-    const dateDebut = new Date(anneeCible, moisCible - 1, 1);
-    const dateFin = estMoisCourant
-      ? new Date(aujourdHui.getFullYear(), aujourdHui.getMonth(), aujourdHui.getDate() - 1, 23, 59, 59)
-      : new Date(anneeCible, moisCible, 0, 23, 59, 59);
+    const jourDuMois = date.getDate();
+    const positionDansMois = jourDuMois + (jourDebutMois - 1); 
+    const numeroSemaineMois = Math.ceil(positionDansMois / 7);
   
-    const [nom, prenom] = nomComplet.trim().split(' ');
-    const agent = await this.agentService.getAgentByPrenomEtNom(prenom, nom);
-      
-    const ticketsTrouves = await this.ticketRepository
-      .createQueryBuilder('ticket')
-      .leftJoinAndSelect('ticket.technicien', 'technicien')
-      .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
-      .where('ticket.state = 3')
-      .andWhere('ticket.technician = :idAgent', { idAgent: agent!.idAgent })
-      .andWhere('ticket.date_create BETWEEN :debut AND :fin', {
-        debut: dateDebut,
-        fin: dateFin,
-      })
-      .getMany();
-  
-    const ticketsFaciles: Ticket[] = [];
-    for (const ticket of ticketsTrouves) {
-      const points = await this.sousCategorieService.getPointsByName(ticket.sousCategorie.nom);
-      if (points === 20) {
-        ticketsFaciles.push(ticket);
-      }
-    }
-  
-    const resultatsParSemaine = new Map<string, { totalHeures: number; nombre: number }>();
-  
-    for (const ticket of ticketsFaciles) {
-      const debut = new Date(ticket.dateCreation);
-      const fin = new Date(ticket.dateResolution);
-      const dureeHeures = (fin.getTime() - debut.getTime()) / (1000 * 60 * 60);
-  
-      const jour = fin.getDay();
-      const decalage = jour === 0 ? -6 : 1 - jour;
-      const debutSemaine = new Date(fin);
-      debutSemaine.setDate(fin.getDate() + decalage);
-      debutSemaine.setHours(0, 0, 0, 0);
-  
-      const cleSemaine = debutSemaine.toISOString().slice(0, 10);
-      const existant = resultatsParSemaine.get(cleSemaine) || {
-        totalHeures: 0,
-        nombre: 0,
-      };
-      existant.totalHeures += dureeHeures;
-      existant.nombre += 1;
-      resultatsParSemaine.set(cleSemaine, existant);
-    }
-  
-    return Array.from(resultatsParSemaine.entries())
-      .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
-      .map(([semaineDebut, { totalHeures, nombre }]) => ({
-        semaineDebut,
-        tempsMoyenHeures: parseFloat((totalHeures / nombre).toFixed(2)),
-      }));
+    return numeroSemaineMois;
   }
-  //10. repartition par mois des tickets pour voir le temps de realisation(DIFFICILE)
-  async calculerTempsMoyenParSemainePourAgentTicketDifficile(
-    nomComplet: string,
-    mois?: number,
-    annee?: number,
-  ): Promise<{ semaineDebut: string; tempsMoyenHeures: number }[]> {
-    const aujourdHui = new Date();
-    const moisCible = mois ?? aujourdHui.getMonth() + 1;
-    const anneeCible = annee ?? aujourdHui.getFullYear();
   
-    const estMoisCourant =
-      moisCible === aujourdHui.getMonth() + 1 &&
-      anneeCible === aujourdHui.getFullYear();
   
-    const dateDebut = new Date(anneeCible, moisCible - 1, 1);
-    const dateFin = estMoisCourant
-      ? new Date(aujourdHui.getFullYear(), aujourdHui.getMonth(), aujourdHui.getDate() - 1, 23, 59, 59)
-      : new Date(anneeCible, moisCible, 0, 23, 59, 59);
-  
-    const [nom, prenom] = nomComplet.trim().split(' ');
-    const agent = await this.agentService.getAgentByPrenomEtNom(prenom, nom);
-      
-    const ticketsTrouves = await this.ticketRepository
-      .createQueryBuilder('ticket')
-      .leftJoinAndSelect('ticket.technicien', 'technicien')
-      .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
-      .where('ticket.state = 3')
-      .andWhere('ticket.technician = :idAgent', { idAgent: agent!.idAgent })
-      .andWhere('ticket.date_create BETWEEN :debut AND :fin', {
-        debut: dateDebut,
-        fin: dateFin,
-      })
-      .getMany();
-  
-    const ticketsFaciles: Ticket[] = [];
-    for (const ticket of ticketsTrouves) {
-      const points = await this.sousCategorieService.getPointsByName(ticket.sousCategorie.nom);
-      if (points === 30) {
-        ticketsFaciles.push(ticket);
-      }
-    }
-  
-    const resultatsParSemaine = new Map<string, { totalHeures: number; nombre: number }>();
-  
-    for (const ticket of ticketsFaciles) {
-      const debut = new Date(ticket.dateCreation);
-      const fin = new Date(ticket.dateResolution);
-      const dureeHeures = (fin.getTime() - debut.getTime()) / (1000 * 60 * 60);
-  
-      const jour = fin.getDay();
-      const decalage = jour === 0 ? -6 : 1 - jour;
-      const debutSemaine = new Date(fin);
-      debutSemaine.setDate(fin.getDate() + decalage);
-      debutSemaine.setHours(0, 0, 0, 0);
-  
-      const cleSemaine = debutSemaine.toISOString().slice(0, 10);
-      const existant = resultatsParSemaine.get(cleSemaine) || {
-        totalHeures: 0,
-        nombre: 0,
-      };
-      existant.totalHeures += dureeHeures;
-      existant.nombre += 1;
-      resultatsParSemaine.set(cleSemaine, existant);
-    }
-  
-    return Array.from(resultatsParSemaine.entries())
-      .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
-      .map(([semaineDebut, { totalHeures, nombre }]) => ({
-        semaineDebut,
-        tempsMoyenHeures: parseFloat((totalHeures / nombre).toFixed(2)),
-      }));
+  private convertirEnHeuresMinutes(heures: number): string {
+    const h = Math.floor(heures);
+    const m = Math.round((heures - h) * 60);
+    return `${h}h${m.toString().padStart(2, '0')}`;
   }
   
   //11.les tickets realisés par nom 
 
-  async getTicketsRealisesParNom(nomComplet: string, mois?: number, annee?: number) {
+  async getTicketsRealisesParId(idAgent: number, mois?: number, annee?: number) {
     const now = new Date();
     const targetMois = mois ?? now.getMonth() + 1;
     const targetAnnee = annee ?? now.getFullYear();
-
+  
     const debut = new Date(targetAnnee, targetMois - 1, 1);
     const fin = (mois && annee)
       ? new Date(targetAnnee, targetMois, 1)
       : new Date(now.getFullYear(), now.getMonth(), now.getDate()); // jusqu'à aujourd’hui
-
-    
+  
     const ticketsAgent = await this.ticketRepository
       .createQueryBuilder('ticket')
       .leftJoinAndSelect('ticket.technicien', 'agent')
       .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
       .where('ticket.statut = :state', { state: 3 })
       .andWhere('ticket.dateCreation BETWEEN :debut AND :fin', { debut, fin })
-      .andWhere("CONCAT(agent.nom, ' ', agent.prenom) = :nomComplet", { nomComplet })
+      .andWhere('agent.idAgent = :idAgent', { idAgent }) // <-- Changement ici
       .select([
         'ticket.idTicket AS idTicket',
         'ticket.dateCreation AS dateCreation',
@@ -781,10 +529,10 @@ private msToHeureMinute(ms: number): string {
         'sousCategorie.nom AS sousCategorieNom',
       ])
       .getRawMany();
-    
+  
     const sousCategories = [...new Set(ticketsAgent.map(t => t.sousCategorieNom))];
     const moyennesParSousCategorie: Record<string, number> = {};
-
+  
     for (const sousCategorieNom of sousCategories) {
       const ticketsSousCat = await this.ticketRepository.find({
         where: {
@@ -797,25 +545,25 @@ private msToHeureMinute(ms: number): string {
         relations: ['sousCategorie'],
         select: ['dateCreation', 'dateResolution'],
       });
-
+  
       const tempsTotaux = ticketsSousCat
         .map(t => new Date(t.dateResolution).getTime() - new Date(t.dateCreation).getTime())
         .filter(duree => !isNaN(duree));
-
+  
       const moyenne =
         tempsTotaux.length > 0
           ? tempsTotaux.reduce((a, b) => a + b, 0) / tempsTotaux.length
           : 0;
-
+  
       moyennesParSousCategorie[sousCategorieNom] = moyenne;
     }
-
+  
     return Promise.all(
       ticketsAgent.map(async (ticket) => {
         const dureeAgent = new Date(ticket.dateResolution).getTime() - new Date(ticket.dateCreation).getTime();
         const points = await this.sousCategorieService.getPointsByName(ticket.sousCategorieNom);
         const type = points === 10 ? 'facile' : points === 20 ? 'moyen' : 'difficile';
-
+  
         return {
           id: ticket.idTicket,
           type,
@@ -827,7 +575,7 @@ private msToHeureMinute(ms: number): string {
   }
   
   //12.Taux de resolution d'un agent FACILE
-  async getStatistiquesTicketsFacilesParAgent(nomComplet: string, mois?: number, annee?: number) {
+  async getStatistiquesTicketsParComplexite(idAgent: number, mois?: number, annee?: number) {
     const now = new Date();
     const targetMois = mois ?? now.getMonth() + 1;
     const targetAnnee = annee ?? now.getFullYear();
@@ -838,132 +586,45 @@ private msToHeureMinute(ms: number): string {
         ? new Date(targetAnnee, targetMois, 1)
         : new Date(now.getFullYear(), now.getMonth(), now.getDate()); // jusqu’à hier
   
+    // Récupération de tous les tickets de l'agent pour la période
     const tickets = await this.ticketRepository
       .createQueryBuilder('ticket')
       .leftJoin('ticket.technicien', 'agent')
       .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
-      .where("CONCAT(agent.nom, ' ', agent.prenom) = :nomComplet", { nomComplet })
+      .where('agent.id = :idAgent', { idAgent })
       .andWhere('ticket.dateCreation BETWEEN :debut AND :fin', { debut, fin })
       .getMany();
   
-    const ticketsFaciles = await Promise.all(
+    // Attribution des points pour chaque ticket
+    const ticketsAvecPoints = await Promise.all(
       tickets.map(async (ticket) => {
         const points = await this.sousCategorieService.getPointsByName(ticket.sousCategorie.nom);
         return {
           ...ticket,
-          estFacile: points === 10,
+          points,
         };
       })
     );
   
-    const ticketsFacilesRecus = ticketsFaciles.filter(t => t.estFacile).length;
-    const ticketsFacilesResolus = ticketsFaciles.filter(t => t.estFacile && t.statut === 3).length;
+    // Fonction utilitaire pour calculer les stats par complexité
+    const calculerStats = (ticketsFiltres: typeof ticketsAvecPoints) => {
+      const totalRepartis = ticketsFiltres.length;
+      const resolus = ticketsFiltres.filter(t => t.statut === 3).length;
+      const pourcentage = totalRepartis > 0 ? parseFloat(((resolus / totalRepartis) * 100).toFixed(2)) : 0;
+      return [{ totalRepartis, resolus, pourcentage }];
+    };
   
-    const tauxRealisation =
-      ticketsFacilesRecus > 0
-        ? Math.round((ticketsFacilesResolus / ticketsFacilesRecus) * 100)
-        : 0;
+    const faciles = ticketsAvecPoints.filter(t => t.points === 10);
+    const moyens = ticketsAvecPoints.filter(t => t.points === 20);
+    const difficiles = ticketsAvecPoints.filter(t => t.points === 30);
   
     return {
-      agent: nomComplet,
-      ticketsFacilesRecus,
-      ticketsFacilesResolus,
-      tauxRealisation: `${tauxRealisation}%`,
+      faciles: calculerStats(faciles),
+      moyens: calculerStats(moyens),
+      difficiles: calculerStats(difficiles),
     };
   }
-
-  //13.Taux de resolution d'un agent MOYEN
-  async getStatistiquesTicketsMoyensParAgent(nomComplet: string, mois?: number, annee?: number) {
-    const now = new Date();
-    const targetMois = mois ?? now.getMonth() + 1;
-    const targetAnnee = annee ?? now.getFullYear();
   
-    const debut = new Date(targetAnnee, targetMois - 1, 1);
-    const fin =
-      mois && annee
-        ? new Date(targetAnnee, targetMois, 1)
-        : new Date(now.getFullYear(), now.getMonth(), now.getDate()); // jusqu’à hier
-  
-    const tickets = await this.ticketRepository
-      .createQueryBuilder('ticket')
-      .leftJoin('ticket.technicien', 'agent')
-      .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
-      .where("CONCAT(agent.nom, ' ', agent.prenom) = :nomComplet", { nomComplet })
-      .andWhere('ticket.dateCreation BETWEEN :debut AND :fin', { debut, fin })
-      .getMany();
-  
-    const ticketsMoyens = await Promise.all(
-      tickets.map(async (ticket) => {
-        const points = await this.sousCategorieService.getPointsByName(ticket.sousCategorie.nom);
-        return {
-          ...ticket,
-          estMoyen: points === 20,
-        };
-      })
-    );
-  
-    const ticketsMoyensRecus = ticketsMoyens.filter(t => t.estMoyen).length;
-    const ticketsMoyensResolus = ticketsMoyens.filter(t => t.estMoyen && t.statut === 3).length;
-  
-    const tauxRealisation =
-      ticketsMoyensRecus > 0
-        ? Math.round((ticketsMoyensResolus / ticketsMoyensRecus) * 100)
-        : 0;
-  
-    return {
-      agent: nomComplet,
-      ticketsMoyensRecus,
-      ticketsMoyensResolus,
-      tauxRealisation: `${tauxRealisation}%`,
-    };
-  }
-
-  //14.Taux de resolution d'un agent DIFFICILE
-  async getStatistiquesTicketsDifficilesParAgent(nomComplet: string, mois?: number, annee?: number) {
-    const now = new Date();
-    const targetMois = mois ?? now.getMonth() + 1;
-    const targetAnnee = annee ?? now.getFullYear();
-  
-    const debut = new Date(targetAnnee, targetMois - 1, 1);
-    const fin =
-      mois && annee
-        ? new Date(targetAnnee, targetMois, 1)
-        : new Date(now.getFullYear(), now.getMonth(), now.getDate()); // jusqu’à hier
-  
-    const tickets = await this.ticketRepository
-      .createQueryBuilder('ticket')
-      .leftJoin('ticket.technicien', 'agent')
-      .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
-      .where("CONCAT(agent.nom, ' ', agent.prenom) = :nomComplet", { nomComplet })
-      .andWhere('ticket.dateCreation BETWEEN :debut AND :fin', { debut, fin })
-      .getMany();
-  
-    const ticketsDifficiles = await Promise.all(
-      tickets.map(async (ticket) => {
-        const points = await this.sousCategorieService.getPointsByName(ticket.sousCategorie.nom);
-        return {
-          ...ticket,
-          estDifficile: points === 30,
-        };
-      })
-    );
-  
-    const ticketsDifficilesRecus = ticketsDifficiles.filter(t => t.estDifficile).length;
-    const ticketsDifficilesResolus = ticketsDifficiles.filter(t => t.estDifficile && t.statut === 3).length;
-  
-    const tauxRealisation =
-      ticketsDifficilesRecus > 0
-        ? Math.round((ticketsDifficilesResolus / ticketsDifficilesRecus) * 100)
-        : 0;
-  
-    return {
-      agent: nomComplet,
-      ticketsDifficilesRecus,
-      ticketsDifficilesResolus,
-      tauxRealisation: `${tauxRealisation}%`,
-    };
-  }
-
   //15.Periode de forte activité point
   async obtenirPointsTicketsEnCoursDes10MoisPrecedents(mois?: number, annee?: number): Promise<
   {
