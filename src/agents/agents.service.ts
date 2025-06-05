@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Agent } from './entities/Agent.entity';
 import { AgentStats } from './interfaces/agent-stats.interface';
 
 @Injectable()
 export class AgentsService {
   constructor(
+    private readonly dataSource: DataSource,
     @InjectRepository(Agent)
     private readonly agentRepository: Repository<Agent>,
   ) {}
@@ -135,7 +136,7 @@ export class AgentsService {
   
     const resolusRapides = resolus.filter(t =>
       t.dateCreation &&
-      (new Date(t.dateResolution).getTime() - new Date(t.dateCreation).getTime()) / (1000 * 3600 * 24) <= 2
+      (new Date(t.dateResolution).getTime() - new Date(t.dateCreation).getTime()) / (1000 * 3600 * 24) <= 1
     );
   
     const tauxResolutionRapide = totalResolus > 0 ? resolusRapides.length / totalResolus : 0;
@@ -143,8 +144,8 @@ export class AgentsService {
   
     const score =
       tauxRealisation * 0.5 +
-      tauxResolutionRapide * 0.4 +
-      (volumeTraite / 100) * 0.1;
+      tauxResolutionRapide * 0.3 +
+      (volumeTraite / 100) * 0.2;
   
     return {
       score: Math.round(score * 5),
@@ -165,6 +166,13 @@ export class AgentsService {
     return this.agentRepository.findOne({
       where: { prenom, nom },
     });
+  }
+  async getInfoAgentParNomOuPrenom(terme: string) {
+    return await this.dataSource
+      .getRepository(Agent)
+      .createQueryBuilder('agent')
+      .where('agent.nom ILIKE :terme OR agent.prenom ILIKE :terme', { terme: `%${terme}%` })
+      .getOne();
   }
   
 }

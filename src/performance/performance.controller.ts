@@ -109,7 +109,7 @@ export class PerformanceController {
   }
 
   //11.Temps par semaine d'un agent 
-  @Get('temps-semaine-facile')
+  @Get('temps-semaine')
   async calculerTempsMoyenParSemainePourAgentTicket(
     @Query('idAgent') idAgent: number,
     @Query('mois') mois?: number,
@@ -119,7 +119,7 @@ export class PerformanceController {
   }
 
   
-  //14.Taux de realisation d'un agent FACILE
+  //14.Taux de realisation d'un agent 
   @Get('taux-de')
   async getStatistiquesTicketsFacilesParAgent(
     @Query('idAgent') idAgent: number,
@@ -147,4 +147,23 @@ export class PerformanceController {
   ){
     return this.performanceService.getTempsMoyenResolutionParComplexiteEtAgent(mois,annee);
   }
+
+  //19.Classement
+  @Get('classement')
+  async getClassementAgents(
+    @Query('mois') mois?: number,
+    @Query('annee') annee?: number,
+  ){
+    return this.performanceService.getClassementAgents(mois,annee);
+  }
+
+  //20.Recherche
+  @Get('chercher')
+async rechercherParIdentifiantOuNom(
+  @Query('terme') terme: string,
+) {
+  const termeFinal: string | number = !isNaN(Number(terme)) ? Number(terme) : terme;
+  return this.performanceService.rechercherParIdentifiantOuNom(termeFinal);
+}
+
 }
