@@ -196,15 +196,19 @@ export class TicketsService {
       .addSelect('SUM(CASE WHEN ticket.statut = 1 THEN 1 ELSE 0 END)', 'nbFermes')
       .addSelect('SUM(CASE WHEN ticket.statut = 2 THEN 1 ELSE 0 END)', 'nbEnCours')
       .addSelect('SUM(CASE WHEN ticket.statut = 3 THEN 1 ELSE 0 END)', 'nbResolus')
+      .addSelect('SUM(CASE WHEN ticket.statut IN (4,5,6) THEN 1 ELSE 0 END)', 'autres')
       .addSelect('COUNT(ticket.idTicket)', 'total')
       .groupBy('agent.idAgent')
       .getRawMany();
+    
+    
   
     return stats.map(agent => ({
       nomComplet: `${agent.prenom} ${agent.nom}`,
       nbFermes: Number(agent.nbFermes),
       nbEnCours: Number(agent.nbEnCours),
       nbResolus: Number(agent.nbResolus),
+      autres : Number(agent.autres),
       total: Number(agent.total),
     }));
   }
