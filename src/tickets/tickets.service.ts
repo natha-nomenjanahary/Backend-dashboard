@@ -147,9 +147,9 @@ export class TicketsService {
         
           return {
             date: formattedDate,
-            nbFermes: (nbFermes / total) * 100,
-            nbEnCours: (nbEnCours / total) * 100,
-            nbResolus: (nbResolus / total) * 100,
+            nbFermes: parseFloat(((nbFermes / total) * 100).toFixed(2)),
+            nbEnCours: parseFloat(((nbEnCours / total) * 100).toFixed(2)),
+            nbResolus: parseFloat(((nbResolus / total) * 100).toFixed(2)),
           };
         });
         

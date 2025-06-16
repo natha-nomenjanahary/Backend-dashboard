@@ -32,17 +32,24 @@ export class AgentsService {
   
     const agents = await this.agentRepository.find({ relations: ['tickets'] });
   
+    // Récupère tous les tickets du mois pour le dénominateur de ticketsRepartis
+    const allTicketsThisMonth = agents.flatMap(agent => agent.tickets || []).filter(ticket => {
+      if (!ticket.dateCreation) return false;
+      const creation = new Date(ticket.dateCreation);
+      return creation >= startDate && creation <= endDate;
+    });
+  
+    const totalTicketsMois = allTicketsThisMonth.length;
+  
     return agents.map(agent => {
-      
       const tickets = (agent.tickets || []).filter(ticket => {
         if (!ticket.dateCreation) return false;
         const creation = new Date(ticket.dateCreation);
         return creation >= startDate && creation <= endDate;
       });
-    
+  
       const totalAssignes = tickets.filter(t => Number(t.statut) !== ID_ETAT_NON_ATTRIBUE).length;
-    
-      
+  
       const resolus = tickets.filter(t =>
         Number(t.statut) === ID_ETAT_RESOLU &&
         t.dateResolution &&
@@ -50,32 +57,32 @@ export class AgentsService {
         new Date(t.dateResolution) <= endDate
       );
       const totalResolus = resolus.length;
-    
+  
       const tauxRealisation = totalAssignes > 0 ? totalResolus / totalAssignes : 0;
-    
+  
       const resolusRapides = resolus.filter(t =>
         t.dateCreation &&
         (new Date(t.dateResolution).getTime() - new Date(t.dateCreation).getTime()) / (1000 * 3600 * 24) <= 2
       );
-    
+  
       const tauxResolutionRapide = totalResolus > 0 ? resolusRapides.length / totalResolus : 0;
       const volumeTraite = totalResolus;
-    
+  
       const score =
         tauxRealisation * 0.5 +
         tauxResolutionRapide * 0.4 +
         (volumeTraite / 100) * 0.1;
-    
+  
       return {
         id: agent.idAgent,
         nom: `${agent.prenom} ${agent.nom}`,
         poste: agent.poste,
-        ticketsResolus: `${totalResolus}/${totalAssignes}`,
+        ticketsRepartis: `${totalAssignes}/${totalTicketsMois}`,
         performance: Math.round(score * 5),
       };
     });
   }
-
+  
   //2.Info sur un agent
   async getInfoAgentParId(
     idAgent: number,
