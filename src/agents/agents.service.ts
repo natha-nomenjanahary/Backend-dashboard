@@ -167,11 +167,13 @@ export class AgentsService {
       where: { prenom, nom },
     });
   }
-  async getInfoAgentParNomOuPrenom(terme: string) {
-    return await this.dataSource
-      .getRepository(Agent)
+  async getInfoAgentParNomOuPrenom(terme: string): Promise<Agent | null> {
+    const termeFormate = `%${terme.toLowerCase()}%`;
+  
+    return this.agentRepository
       .createQueryBuilder('agent')
-      .where('agent.nom ILIKE :terme OR agent.prenom ILIKE :terme', { terme: `%${terme}%` })
+      .where('LOWER(agent.lastname) LIKE :terme', { terme: termeFormate })
+      .orWhere('LOWER(agent.firstname) LIKE :terme', { terme: termeFormate })
       .getOne();
   }
   
