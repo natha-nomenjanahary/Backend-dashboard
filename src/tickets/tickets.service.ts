@@ -98,7 +98,7 @@ export class TicketsService {
       currentDate <= endDate;
       currentDate.setDate(currentDate.getDate() + 1)
     ) {
-      const dayOfWeek = currentDate.getDay(); 
+      const dayOfWeek = currentDate.getDay();
       if (dayOfWeek !== 0 && dayOfWeek !== 6) {
         dates.push(new Date(currentDate));
       }
@@ -107,54 +107,74 @@ export class TicketsService {
     const formatDate = (date: Date): string =>
       date.toISOString().slice(0, 19).replace('T', ' ');
   
-      const ticketsStats = await this.ticketRepository
-        .createQueryBuilder('ticket')
-        .select('DATE(ticket.date_create)', 'date')
-        .addSelect([
-          `SUM(CASE WHEN ticket.state = 1 THEN 1 ELSE 0 END) AS nbFermes`,
-          `SUM(CASE WHEN ticket.state = 2 THEN 1 ELSE 0 END) AS nbEnCours`,
-          `SUM(CASE WHEN ticket.state = 3 THEN 1 ELSE 0 END) AS nbResolus`,
-        ])
-        .where('ticket.date_create >= :startDate', { startDate: formatDate(startDate) })
-        .andWhere('ticket.date_create <= :endDate', { endDate: formatDate(endDate) })
-        .andWhere('ticket.technicien IS NOT NULL') 
-        .groupBy('DATE(ticket.date_create)')
-        .getRawMany();
-
-        const result = dates.map(date => {
-          const formattedDate = date.toLocaleDateString('fr-CA');
-        
-          const statsForDay = ticketsStats.find(stat => {
-            const statDate = new Date(stat.date);
-            const statFormattedDate = statDate.toLocaleDateString('fr-CA');
-            return statFormattedDate === formattedDate;
-          });
-        
-          if (!statsForDay) {
-            return {
-              date: formattedDate,
-              nbFermes: 0,
-              nbEnCours: 0,
-              nbResolus: 0,
-            };
-          }
-        
-          const nbFermes = Number(statsForDay.nbFermes);
-          const nbEnCours = Number(statsForDay.nbEnCours);
-          const nbResolus = Number(statsForDay.nbResolus);
-        
-          const total = nbFermes + nbEnCours + nbResolus || 1;
-        
-          return {
-            date: formattedDate,
-            nbFermes: parseFloat(((nbFermes / total) * 100).toFixed(2)),
-            nbEnCours: parseFloat(((nbEnCours / total) * 100).toFixed(2)),
-            nbResolus: parseFloat(((nbResolus / total) * 100).toFixed(2)),
-          };
-        });
-        
-    
-    return result;
+    const ticketsStats = await this.ticketRepository
+      .createQueryBuilder('ticket')
+      .select('DATE(ticket.date_create)', 'date')
+      .addSelect([
+        `SUM(CASE WHEN ticket.state = 1 THEN 1 ELSE 0 END) AS nbFermes`,
+        `SUM(CASE WHEN ticket.state = 2 THEN 1 ELSE 0 END) AS nbEnCours`,
+        `SUM(CASE WHEN ticket.state = 3 THEN 1 ELSE 0 END) AS nbResolus`,
+      ])
+      .where('ticket.date_create >= :startDate', { startDate: formatDate(startDate) })
+      .andWhere('ticket.date_create <= :endDate', { endDate: formatDate(endDate) })
+      .andWhere('ticket.technicien IS NOT NULL')
+      .groupBy('DATE(ticket.date_create)')
+      .getRawMany();
+  
+    // === Résumé global ===
+    let totalFermes = 0;
+    let totalEnCours = 0;
+    let totalResolus = 0;
+  
+    for (const stat of ticketsStats) {
+      totalFermes += Number(stat.nbFermes);
+      totalEnCours += Number(stat.nbEnCours);
+      totalResolus += Number(stat.nbResolus);
+    }
+  
+    const totalTickets = totalFermes + totalEnCours + totalResolus;
+  
+    const result = dates.map(date => {
+      const formattedDate = date.toLocaleDateString('fr-CA');
+  
+      const statsForDay = ticketsStats.find(stat => {
+        const statDate = new Date(stat.date);
+        const statFormattedDate = statDate.toLocaleDateString('fr-CA');
+        return statFormattedDate === formattedDate;
+      });
+  
+      if (!statsForDay) {
+        return {
+          date: formattedDate,
+          nbFermes: 0,
+          nbEnCours: 0,
+          nbResolus: 0,
+        };
+      }
+  
+      const nbFermes = Number(statsForDay.nbFermes);
+      const nbEnCours = Number(statsForDay.nbEnCours);
+      const nbResolus = Number(statsForDay.nbResolus);
+  
+      const total = nbFermes + nbEnCours + nbResolus || 1;
+  
+      return {
+        date: formattedDate,
+        nbFermes: parseFloat(((nbFermes / total) * 100).toFixed(2)),
+        nbEnCours: parseFloat(((nbEnCours / total) * 100).toFixed(2)),
+        nbResolus: parseFloat(((nbResolus / total) * 100).toFixed(2)),
+      };
+    });
+  
+    return {
+      resumeGlobal: {
+        totalFermes,
+        totalEnCours,
+        totalResolus,
+        totalTickets,
+      },
+      parJour: result,
+    };
   }
   
   
