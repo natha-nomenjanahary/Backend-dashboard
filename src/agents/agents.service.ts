@@ -12,7 +12,7 @@ export class AgentsService {
     private readonly agentRepository: Repository<Agent>,
   ) {}
 
-  //1.liste des agents avec statistique
+  // 1. Liste des agents avec statistique
   async getAgentsWithTicketStats(
     mois?: number,
     annee?: number
@@ -20,59 +20,71 @@ export class AgentsService {
     const today = new Date();
     const targetMois = mois ?? today.getMonth() + 1;
     const targetAnnee = annee ?? today.getFullYear();
-  
+
     const startDate = new Date(targetAnnee, targetMois - 1, 1);
-    const isMoisActuel = targetMois === today.getMonth() + 1 && targetAnnee === today.getFullYear();
+    const isMoisActuel =
+      targetMois === today.getMonth() + 1 && targetAnnee === today.getFullYear();
     const endDate = isMoisActuel
       ? new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59)
       : new Date(targetAnnee, targetMois, 0, 23, 59, 59);
-  
+
     const ID_ETAT_RESOLU = 3; // "Résolu"
     const ID_ETAT_NON_ATTRIBUE = 5;
-  
-    const agents = await this.agentRepository.find({ relations: ['tickets'] });
-  
-    // Récupère tous les tickets du mois pour le dénominateur de ticketsRepartis
-    const allTicketsThisMonth = agents.flatMap(agent => agent.tickets || []).filter(ticket => {
-      if (!ticket.dateCreation) return false;
-      const creation = new Date(ticket.dateCreation);
-      return creation >= startDate && creation <= endDate;
-    });
-  
-    const totalTicketsMois = allTicketsThisMonth.length;
-  
-    return agents.map(agent => {
-      const tickets = (agent.tickets || []).filter(ticket => {
-        if (!ticket.dateCreation) return false;
-        const creation = new Date(ticket.dateCreation);
-        return creation >= startDate && creation <= endDate;
-      });
-  
-      const totalAssignes = tickets.filter(t => Number(t.statut) !== ID_ETAT_NON_ATTRIBUE).length;
-  
-      const resolus = tickets.filter(t =>
-        Number(t.statut) === ID_ETAT_RESOLU &&
-        t.dateResolution &&
-        new Date(t.dateResolution) >= startDate &&
-        new Date(t.dateResolution) <= endDate
+
+    // ⚡ Charger uniquement les agents + tickets du mois
+    const agents = await this.agentRepository
+      .createQueryBuilder('agent')
+      .leftJoinAndSelect(
+        'agent.tickets',
+        'ticket',
+        'ticket.dateCreation BETWEEN :startDate AND :endDate',
+        { startDate, endDate }
+      )
+      .getMany();
+
+    // ⚡ Nombre total de tickets du mois
+    const totalTicketsMois = await this.dataSource
+      .getRepository('Ticket')
+      .createQueryBuilder('ticket')
+      .where('ticket.dateCreation BETWEEN :startDate AND :endDate', { startDate, endDate })
+      .getCount();
+
+    return agents.map((agent) => {
+      const tickets = agent.tickets || [];
+
+      const totalAssignes = tickets.filter(
+        (t) => Number(t.statut) !== ID_ETAT_NON_ATTRIBUE
+      ).length;
+
+      const resolus = tickets.filter(
+        (t) =>
+          Number(t.statut) === ID_ETAT_RESOLU &&
+          t.dateResolution &&
+          new Date(t.dateResolution) >= startDate &&
+          new Date(t.dateResolution) <= endDate
       );
       const totalResolus = resolus.length;
-  
+
       const tauxRealisation = totalAssignes > 0 ? totalResolus / totalAssignes : 0;
-  
-      const resolusRapides = resolus.filter(t =>
-        t.dateCreation &&
-        (new Date(t.dateResolution).getTime() - new Date(t.dateCreation).getTime()) / (1000 * 3600 * 24) <= 2
+
+      const resolusRapides = resolus.filter(
+        (t) =>
+          t.dateCreation &&
+          (new Date(t.dateResolution).getTime() -
+            new Date(t.dateCreation).getTime()) /
+            (1000 * 3600 * 24) <=
+            24
       );
-  
-      const tauxResolutionRapide = totalResolus > 0 ? resolusRapides.length / totalResolus : 0;
+
+      const tauxResolutionRapide =
+        totalResolus > 0 ? resolusRapides.length / totalResolus : 0;
       const volumeTraite = totalResolus;
-  
+
       const score =
         tauxRealisation * 0.5 +
         tauxResolutionRapide * 0.4 +
         (volumeTraite / 100) * 0.1;
-  
+
       return {
         id: agent.idAgent,
         nom: `${agent.prenom} ${agent.nom}`,
@@ -82,8 +94,8 @@ export class AgentsService {
       };
     });
   }
-  
-  //2.Info sur un agent
+
+  // 2. Info sur un agent
   async getInfoAgentParId(
     idAgent: number,
     mois?: number,
@@ -98,62 +110,74 @@ export class AgentsService {
     email: string;
   }> {
     if (!idAgent) {
-      throw new Error('L\'ID de l’agent est requis');
+      throw new Error("L'ID de l’agent est requis");
     }
-  
+
     const today = new Date();
     const targetMois = mois ?? today.getMonth() + 1;
     const targetAnnee = annee ?? today.getFullYear();
-  
+
     const startDate = new Date(targetAnnee, targetMois - 1, 1);
-    const isMoisActuel = targetMois === today.getMonth() + 1 && targetAnnee === today.getFullYear();
+    const isMoisActuel =
+      targetMois === today.getMonth() + 1 && targetAnnee === today.getFullYear();
     const endDate = isMoisActuel
       ? new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59)
       : new Date(targetAnnee, targetMois, 0, 23, 59, 59);
-  
+
     const ID_ETAT_RESOLU = 3;
     const ID_ETAT_NON_ATTRIBUE = 5;
-  
-    const agent = await this.agentRepository.findOne({
-      relations: ['tickets'],
-      where: { idAgent: idAgent }
-    });
-  
+
+    // ⚡ Charger uniquement l’agent + ses tickets du mois
+    const agent = await this.agentRepository
+      .createQueryBuilder('agent')
+      .leftJoinAndSelect(
+        'agent.tickets',
+        'ticket',
+        'ticket.dateCreation BETWEEN :startDate AND :endDate',
+        { startDate, endDate }
+      )
+      .where('agent.idAgent = :idAgent', { idAgent })
+      .getOne();
+
     if (!agent) {
       throw new Error(`Aucun agent trouvé avec l'ID : ${idAgent}`);
     }
-  
-    const tickets = (agent.tickets || []).filter(ticket => {
-      if (!ticket.dateCreation) return false;
-      const creation = new Date(ticket.dateCreation);
-      return creation >= startDate && creation <= endDate;
-    });
-  
-    const totalAssignes = tickets.filter(t => Number(t.statut) !== ID_ETAT_NON_ATTRIBUE).length;
-  
-    const resolus = tickets.filter(t =>
-      Number(t.statut) === ID_ETAT_RESOLU &&
-      t.dateResolution &&
-      new Date(t.dateResolution) >= startDate &&
-      new Date(t.dateResolution) <= endDate
+
+    const tickets = agent.tickets || [];
+
+    const totalAssignes = tickets.filter(
+      (t) => Number(t.statut) !== ID_ETAT_NON_ATTRIBUE
+    ).length;
+
+    const resolus = tickets.filter(
+      (t) =>
+        Number(t.statut) === ID_ETAT_RESOLU &&
+        t.dateResolution &&
+        new Date(t.dateResolution) >= startDate &&
+        new Date(t.dateResolution) <= endDate
     );
     const totalResolus = resolus.length;
-  
+
     const tauxRealisation = totalAssignes > 0 ? totalResolus / totalAssignes : 0;
-  
-    const resolusRapides = resolus.filter(t =>
-      t.dateCreation &&
-      (new Date(t.dateResolution).getTime() - new Date(t.dateCreation).getTime()) / (1000 * 3600 * 24) <= 1
+
+    const resolusRapides = resolus.filter(
+      (t) =>
+        t.dateCreation &&
+        (new Date(t.dateResolution).getTime() -
+          new Date(t.dateCreation).getTime()) /
+          (1000 * 3600 * 24) <=
+          1
     );
-  
-    const tauxResolutionRapide = totalResolus > 0 ? resolusRapides.length / totalResolus : 0;
+
+    const tauxResolutionRapide =
+      totalResolus > 0 ? resolusRapides.length / totalResolus : 0;
     const volumeTraite = totalResolus;
-  
+
     const score =
       tauxRealisation * 0.5 +
       tauxResolutionRapide * 0.3 +
       (volumeTraite / 100) * 0.2;
-  
+
     return {
       score: Math.round(score * 5),
       id: agent.idAgent,
@@ -161,27 +185,28 @@ export class AgentsService {
       prenom: agent.prenom,
       poste: agent.poste,
       contact: Number(agent.tel),
-      email: agent.email
+      email: agent.email,
     };
   }
-  
-  //Utiliser dans performance
+
+  // Utiliser dans performance
   async getAllAgents(): Promise<Agent[]> {
     return this.agentRepository.find();
   }
+
   async getAgentByPrenomEtNom(prenom: string, nom: string): Promise<Agent | null> {
     return this.agentRepository.findOne({
       where: { prenom, nom },
     });
   }
+
   async getInfoAgentParNomOuPrenom(terme: string): Promise<Agent | null> {
     const termeFormate = `%${terme.toLowerCase()}%`;
-  
+
     return this.agentRepository
       .createQueryBuilder('agent')
       .where('LOWER(agent.lastname) LIKE :terme', { terme: termeFormate })
       .orWhere('LOWER(agent.firstname) LIKE :terme', { terme: termeFormate })
       .getOne();
   }
-  
 }

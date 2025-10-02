@@ -5,7 +5,7 @@ import { SousCategorieService } from '../sous-categories/sous-categories.service
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { Ticket } from '../tickets/entities/Ticket.entity';
-import { Agent } from 'http';
+import { calculerHeuresOuvrees } from './utils'; 
 
 @Injectable()
 export class PerformanceService {
@@ -232,7 +232,7 @@ private msToHeureMinute(ms: number): string {
     return Array.from(resultat.values());
   }
 
-  //4. Temps moyen de resolution des tickets FACILES
+    //4. Temps moyen de resolution des tickets FACILES
   async calculerTempsMoyenResolutionParComplexiteParAgent(
     mois?: number,
     annee?: number,
@@ -259,16 +259,16 @@ private msToHeureMinute(ms: number): string {
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth() + 1;
-  
+
     const targetYear = annee ?? currentYear;
     const targetMonth = mois ?? currentMonth;
-  
+
     const startDate = new Date(targetYear, targetMonth - 1, 1);
     const endDate =
       targetYear === currentYear && targetMonth === currentMonth
         ? new Date(targetYear, targetMonth - 1, today.getDate() - 1, 23, 59, 59, 999)
         : new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
-  
+
     const tickets = await this.ticketRepository
       .createQueryBuilder('ticket')
       .leftJoinAndSelect('ticket.technicien', 'technicien')
@@ -279,29 +279,31 @@ private msToHeureMinute(ms: number): string {
         end: endDate,
       })
       .getMany();
-  
+
     const regroupement = {
       faciles: new Map<number, { agentId: number; nomAgent: string; totalTemps: number; nombreTickets: number }>(),
       moyens: new Map<number, { agentId: number; nomAgent: string; totalTemps: number; nombreTickets: number }>(),
       difficiles: new Map<number, { agentId: number; nomAgent: string; totalTemps: number; nombreTickets: number }>(),
     };
-  
+
     for (const ticket of tickets) {
       const agent = ticket.technicien;
       const sousCategorie = ticket.sousCategorie;
       if (!agent || !sousCategorie) continue;
-  
+
       const points = await this.sousCategorieService.getPointsByName(sousCategorie.nom);
       const dateDebut = new Date(ticket.dateCreation);
       const dateFin = new Date(ticket.dateResolution);
-      const tempsResolutionHeures = (dateFin.getTime() - dateDebut.getTime()) / (1000 * 60 * 60);
-  
+
+      // **Important** : calculerHeuresOuvrees est synchrone -> on n'utilise pas await
+      const tempsResolutionHeures = calculerHeuresOuvrees(dateDebut, dateFin);
+
       let map: Map<number, any> | null = null;
       if (points === 10) map = regroupement.faciles;
       else if (points === 20) map = regroupement.moyens;
       else if (points === 30) map = regroupement.difficiles;
       else continue;
-  
+
       if (!map.has(agent.idAgent)) {
         map.set(agent.idAgent, {
           agentId: agent.idAgent,
@@ -310,12 +312,12 @@ private msToHeureMinute(ms: number): string {
           nombreTickets: 0,
         });
       }
-  
+
       const donnees = map.get(agent.idAgent);
       donnees.totalTemps += tempsResolutionHeures;
       donnees.nombreTickets += 1;
     }
-  
+
     const formatter = (map: Map<number, any>) =>
       Array.from(map.values()).map(d => ({
         agentId: d.agentId,
@@ -323,13 +325,14 @@ private msToHeureMinute(ms: number): string {
         nombreTickets: d.nombreTickets,
         tempsMoyenHeures: d.nombreTickets > 0 ? parseFloat((d.totalTemps / d.nombreTickets).toFixed(2)) : 0,
       }));
-  
+
     return {
       faciles: formatter(regroupement.faciles),
       moyens: formatter(regroupement.moyens),
       difficiles: formatter(regroupement.difficiles),
     };
   }
+
   
   //7.Identification des periodes de forte activité
   async obtenirTicketsEnCoursDes10MoisPrecedents(mois?: number, annee?: number): Promise<
@@ -452,7 +455,10 @@ private msToHeureMinute(ms: number): string {
       const points = await this.sousCategorieService.getPointsByName(ticket.sousCategorie.nom);
       const debut = new Date(ticket.dateCreation);
       const fin = new Date(ticket.dateResolution);
-      const dureeHeures = (fin.getTime() - debut.getTime()) / (1000 * 60 * 60);
+  
+      // <-- CHANGEMENT : on utilise calculerHeuresOuvrees ici au lieu du calcul brut
+      const dureeHeures = calculerHeuresOuvrees(debut, fin);
+  
       const semaine = this.getNumeroSemaine(fin);
   
       let mapCible: Map<number, { totalHeures: number; nombre: number }> | undefined;
@@ -484,7 +490,6 @@ private msToHeureMinute(ms: number): string {
     };
   }
   
-
   private getNumeroSemaine(date: Date): number {
     const debutMois = new Date(date.getFullYear(), date.getMonth(), 1);
     const jourDebutMois = debutMois.getDay() || 5; 
@@ -495,7 +500,6 @@ private msToHeureMinute(ms: number): string {
   
     return numeroSemaineMois;
   }
-  
   
   private convertirEnHeuresMinutes(heures: number): string {
     const h = Math.floor(heures);
@@ -546,9 +550,14 @@ private msToHeureMinute(ms: number): string {
         select: ['dateCreation', 'dateResolution'],
       });
   
-      const tempsTotaux = ticketsSousCat
-        .map(t => new Date(t.dateResolution).getTime() - new Date(t.dateCreation).getTime())
-        .filter(duree => !isNaN(duree));
+      // === Correction : calculs asynchrones avec calculerHeuresOuvrees ===
+      const tempsTotauxPromises = ticketsSousCat.map(async (t) => {
+        const h = await this.calculerHeuresOuvrees(new Date(t.dateCreation), new Date(t.dateResolution));
+        return h * 3600000; // reconverti en ms pour rester compatible avec msToHeureMinute
+      });
+  
+      const tempsTotauxAll = await Promise.all(tempsTotauxPromises);
+      const tempsTotaux = tempsTotauxAll.filter(duree => !isNaN(duree));
   
       const moyenne =
         tempsTotaux.length > 0
@@ -560,7 +569,10 @@ private msToHeureMinute(ms: number): string {
   
     return Promise.all(
       ticketsAgent.map(async (ticket) => {
-        const dureeAgent = new Date(ticket.dateResolution).getTime() - new Date(ticket.dateCreation).getTime();
+        // === Correction : awaiter la promesse avant de multiplier ===
+        const dureeAgentHours = await this.calculerHeuresOuvrees(new Date(ticket.dateCreation), new Date(ticket.dateResolution));
+        const dureeAgent = dureeAgentHours * 3600000;
+  
         const points = await this.sousCategorieService.getPointsByName(ticket.sousCategorieNom);
         const type = points === 10 ? 'facile' : points === 20 ? 'moyen' : 'difficile';
   
@@ -573,6 +585,8 @@ private msToHeureMinute(ms: number): string {
       }),
     );
   }
+  
+  
   
   //12.Taux de resolution d'un agent FACILE
   async getStatistiquesTicketsParComplexite(idAgent: number, mois?: number, annee?: number) {
@@ -751,7 +765,7 @@ private msToHeureMinute(ms: number): string {
       }
   
       const idAgent = ticket.technicien.idAgent;
-      const dureeResolution = new Date(ticket.dateResolution).getTime() - new Date(ticket.dateCreation).getTime();
+      const dureeResolution = await this.calculerHeuresOuvrees(new Date(ticket.dateCreation), new Date(ticket.dateResolution));
       if (dureeResolution <= 0) continue;
   
       const nomCategorie = ticket.sousCategorie.nom;
@@ -763,7 +777,7 @@ private msToHeureMinute(ms: number): string {
         pointsParCategorie.set(nomCategorie, points);
       }
   
-      const dureeHeures = dureeResolution / (1000 * 60 * 60); // convertit en heures décimales
+      const dureeHeures = dureeResolution; // déjà en heures ouvrées
   
       if (points === 10) tempsParAgent[idAgent].facile.push(dureeHeures);
       else if (points === 20) tempsParAgent[idAgent].moyen.push(dureeHeures);
@@ -1034,7 +1048,55 @@ private msToHeureMinute(ms: number): string {
     };
   }
   
+  //19.heure qui considere seulement les heures de travail
+  async calculerHeuresOuvrees(dateDebut: Date, dateFin: Date): Promise<number> {
+    if (dateFin <= dateDebut) return 0;
   
-    
+    // Horaires de travail
+    const matinDebut = { h: 8, m: 30 };
+    const matinFin = { h: 12, m: 0 };
+    const apremDebut = { h: 13, m: 0 };
+    const apremFin = { h: 16, m: 0 };
+  
+    let totalHeures = 0;
+  
+    // On avance jour par jour
+    let currentDay = new Date(dateDebut);
+    currentDay.setHours(0, 0, 0, 0);
+  
+    const lastDay = new Date(dateFin);
+    lastDay.setHours(23, 59, 59, 999);
+  
+    while (currentDay <= lastDay) {
+      const dayOfWeek = currentDay.getDay(); // 0 = dimanche, 6 = samedi
+  
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        // Fonction interne pour calculer chevauchement entre [slotStart, slotEnd] et [dateDebut, dateFin]
+        const addOverlap = (slotStart: Date, slotEnd: Date) => {
+          const start = dateDebut > slotStart ? dateDebut : slotStart;
+          const end = dateFin < slotEnd ? dateFin : slotEnd;
+          if (end > start) {
+            totalHeures += (end.getTime() - start.getTime()) / 3600000;
+          }
+        };
+  
+        // Slots de la journée
+        const matinStart = new Date(currentDay); matinStart.setHours(matinDebut.h, matinDebut.m, 0, 0);
+        const matinEnd = new Date(currentDay); matinEnd.setHours(matinFin.h, matinFin.m, 0, 0);
+  
+        const apremStart = new Date(currentDay); apremStart.setHours(apremDebut.h, apremDebut.m, 0, 0);
+        const apremEnd = new Date(currentDay); apremEnd.setHours(apremFin.h, apremFin.m, 0, 0);
+  
+        addOverlap(matinStart, matinEnd);
+        addOverlap(apremStart, apremEnd);
+      }
+  
+      // Passer au jour suivant
+      currentDay.setDate(currentDay.getDate() + 1);
+    }
+  
+    return parseFloat(totalHeures.toFixed(2));
+  }
+      
 
 }

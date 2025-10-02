@@ -14,7 +14,10 @@ export class AgentsController {
         @Query('mois') mois?: number,
         @Query('annee') annee?: number,
     ) {
-        return this.agentsService.getAgentsWithTicketStats(mois, annee);
+        console.time('agents-stats');
+        const result = await this.agentsService.getAgentsWithTicketStats(mois, annee);
+        console.timeEnd('agents-stats');
+        return result;
     }
 
     //2. Info d'un agent

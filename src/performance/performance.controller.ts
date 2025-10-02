@@ -159,11 +159,12 @@ export class PerformanceController {
 
   //20.Recherche
   @Get('chercher')
-async rechercherParIdentifiantOuNom(
-  @Query('terme') terme: string,
-) {
-  const termeFinal: string | number = !isNaN(Number(terme)) ? Number(terme) : terme;
-  return this.performanceService.rechercherParIdentifiantOuNom(termeFinal);
-}
+  async rechercherParIdentifiantOuNom(
+    @Query('terme') terme: string,
+  ) {
+    const termeFinal: string | number = !isNaN(Number(terme)) ? Number(terme) : terme;
+    return this.performanceService.rechercherParIdentifiantOuNom(termeFinal);
+  }
 
+  
 }

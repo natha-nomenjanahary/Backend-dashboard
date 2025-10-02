@@ -16,7 +16,7 @@ export class Agent {
   poste: string;
 
   @Column({ name: 'phone', nullable: true })
-  tel: number;
+  tel: string;
 
   @Column({ name: 'mail' })
   email: string;
@@ -24,7 +24,7 @@ export class Agent {
   @OneToMany(() => Ticket, (ticket) => ticket.technicien)
   tickets: Ticket[];
 
-  // -------- nouveaux champs --------
+  
   @Column({ name: 'password', type: 'varchar', length: 512, nullable: true })
   password?: string;
 
