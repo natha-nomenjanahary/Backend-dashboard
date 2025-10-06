@@ -19,7 +19,10 @@ export class TicketsService {
   
 
   // 1. Tickets réalisés
-  async getTicketsRealisesParAgent(mois?: number, annee?: number): Promise<{ agentId: number, agentName: string, total: number }[]> {
+  async getTicketsRealisesParAgent(
+    mois?: number,
+    annee?: number,
+  ): Promise<{ agentId: number; agentName: string; total: number }[]> {
     const today = new Date();
     const targetMois = mois ?? today.getMonth() + 1;
     const targetAnnee = annee ?? today.getFullYear();
@@ -27,29 +30,38 @@ export class TicketsService {
     const startDate = new Date(targetAnnee, targetMois - 1, 1);
   
     const isMoisActuel =
-      targetMois === today.getMonth() + 1 &&
-      targetAnnee === today.getFullYear();
+      targetMois === today.getMonth() + 1 && targetAnnee === today.getFullYear();
   
     const endDate = isMoisActuel
       ? new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, 23, 59, 59)
       : new Date(targetAnnee, targetMois, 0, 23, 59, 59);
   
-    
-    const tickets = await this.getTicketsDesAgentsDansIntervalle(startDate, endDate);
-  
-    const ID_STATE_RESOLU = 3;
-  
-    
-    const realises = tickets.filter(ticket => ticket.state === ID_STATE_RESOLU);
+    // 🔹 Requête conforme à ton entity Ticket et ta table tincidents
+    const tickets = await this.ticketRepository
+      .createQueryBuilder('ticket')
+      .leftJoin('ticket.technicien', 'technicien')
+      .where('ticket.dateResolution BETWEEN :start AND :end', { start: startDate, end: endDate })
+      .andWhere('ticket.statut = :state', { state: 3 })
+      .andWhere('ticket.technicien IS NOT NULL')
+      .select([
+        'ticket.idTicket AS idTicket',
+        'ticket.statut AS state',
+        'technicien.idAgent AS agentId',
+        "CONCAT(technicien.nom, ' ', technicien.prenom) AS agentName",
+      ])
+      .getRawMany();
   
     const agents = await this.agentRepository.find();
-    const countMap = new Map<number, { agentName: string, total: number }>();
+    const countMap = new Map<number, { agentName: string; total: number }>();
   
+    // Initialisation de chaque agent à 0 ticket
     for (const agent of agents) {
       const nom = `${agent.nom} ${agent.prenom}`.trim();
       countMap.set(agent.idAgent, { agentName: nom, total: 0 });
     }
-    for (const ticket of realises) {
+  
+    // Comptage des tickets réalisés par agent
+    for (const ticket of tickets) {
       const current = countMap.get(ticket.agentId);
       if (current) {
         current.total += 1;
@@ -60,6 +72,8 @@ export class TicketsService {
         });
       }
     }
+  
+    // Formatage du retour
     return Array.from(countMap.entries()).map(([agentId, { agentName, total }]) => ({
       agentId,
       agentName,
@@ -67,9 +81,9 @@ export class TicketsService {
     }));
   }
   
-
   // 2. Statut des tickets par jour
   async getStatutTicketsParJourExcluantWeekends(month?: number, year?: number) {
+    // --- 1) calcul des bornes startDate / endDate (avec heures locales)
     let startDate: Date;
     let endDate: Date;
   
@@ -77,95 +91,101 @@ export class TicketsService {
       const today = new Date();
       const day = today.getDate();
   
-      startDate = new Date(today);
-      startDate.setMonth(startDate.getMonth() - 1);
-      startDate.setDate(day);
+      // start = même jour le mois précédent (capé au dernier jour du mois précédent si nécessaire)
+      const prevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const daysInPrevMonth = new Date(prevMonth.getFullYear(), prevMonth.getMonth() + 1, 0).getDate();
+      const startDay = Math.min(day, daysInPrevMonth);
+      startDate = new Date(prevMonth.getFullYear(), prevMonth.getMonth(), startDay, 0, 0, 0, 0);
   
-      endDate = new Date(today);
-      endDate.setDate(day - 1);
+      // end = hier (local)
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      endDate = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
     } else {
-      startDate = new Date(year, month - 1, 1);
-      endDate = new Date(year, month, 0);
+      // mois/année fournis => tout le mois (local)
+      startDate = new Date(year, month - 1, 1, 0, 0, 0, 0);
+      endDate = new Date(year, month, 0, 23, 59, 59, 999);
     }
   
     if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
       throw new Error('startDate ou endDate est invalide');
     }
   
+    // --- 2) Récupérer la liste des jours ouvrés
     const dates: Date[] = [];
-    for (
-      let currentDate = new Date(startDate);
-      currentDate <= endDate;
-      currentDate.setDate(currentDate.getDate() + 1)
-    ) {
-      const dayOfWeek = currentDate.getDay();
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dayOfWeek = d.getDay();
       if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        dates.push(new Date(currentDate));
+        dates.push(new Date(d)); // copie
       }
     }
   
-    const formatDate = (date: Date): string =>
-      date.toISOString().slice(0, 19).replace('T', ' ');
+    // helper format YYYY-MM-DD local pour comparaison fiable
+    const toYMD = (dt: Date) => {
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      return `${y}-${m}-${dd}`;
+    };
   
+    // --- 3) Requête agrégée : on considère seulement les tickets créés ET résolus dans le mois donné
     const ticketsStats = await this.ticketRepository
       .createQueryBuilder('ticket')
-      .select('DATE(ticket.date_create)', 'date')
-      .addSelect([
-        `SUM(CASE WHEN ticket.state = 1 THEN 1 ELSE 0 END) AS nbFermes`,
-        `SUM(CASE WHEN ticket.state = 2 THEN 1 ELSE 0 END) AS nbEnCours`,
-        `SUM(CASE WHEN ticket.state = 3 THEN 1 ELSE 0 END) AS nbResolus`,
-      ])
-      .where('ticket.date_create >= :startDate', { startDate: formatDate(startDate) })
-      .andWhere('ticket.date_create <= :endDate', { endDate: formatDate(endDate) })
-      .andWhere('ticket.technicien IS NOT NULL')
-      .groupBy('DATE(ticket.date_create)')
+      .select('DATE(ticket.date_res)', 'date')
+      .addSelect(`SUM(CASE WHEN ticket.state = 1 THEN 1 ELSE 0 END)`, 'nbFermes')
+      .addSelect(`SUM(CASE WHEN ticket.state = 2 THEN 1 ELSE 0 END)`, 'nbEnCours')
+      .addSelect(`SUM(CASE WHEN ticket.state = 3 THEN 1 ELSE 0 END)`, 'nbResolus')
+      .where('ticket.date_create >= :startDate AND ticket.date_create <= :endDate', { startDate, endDate })
+      .andWhere('ticket.date_res >= :startDate AND ticket.date_res <= :endDate', { startDate, endDate })
+      .andWhere('ticket.technician IS NOT NULL')
+      .groupBy('DATE(ticket.date_res)')
+      .orderBy('DATE(ticket.date_res)', 'ASC')
       .getRawMany();
   
-    // === Résumé global ===
+    // --- 4) Totaux globaux
     let totalFermes = 0;
     let totalEnCours = 0;
     let totalResolus = 0;
   
     for (const stat of ticketsStats) {
-      totalFermes += Number(stat.nbFermes);
-      totalEnCours += Number(stat.nbEnCours);
-      totalResolus += Number(stat.nbResolus);
+      totalFermes += Number(stat.nbFermes || 0);
+      totalEnCours += Number(stat.nbEnCours || 0);
+      totalResolus += Number(stat.nbResolus || 0);
     }
   
     const totalTickets = totalFermes + totalEnCours + totalResolus;
   
+    // --- 5) Construire parJour : on compare en YYYY-MM-DD local
     const result = dates.map(date => {
-      const formattedDate = date.toLocaleDateString('fr-CA');
+      const dayKey = toYMD(date);
   
       const statsForDay = ticketsStats.find(stat => {
         const statDate = new Date(stat.date);
-        const statFormattedDate = statDate.toLocaleDateString('fr-CA');
-        return statFormattedDate === formattedDate;
+        return toYMD(statDate) === dayKey;
       });
   
       if (!statsForDay) {
         return {
-          date: formattedDate,
+          date: dayKey,
           nbFermes: 0,
           nbEnCours: 0,
           nbResolus: 0,
         };
       }
   
-      const nbFermes = Number(statsForDay.nbFermes);
-      const nbEnCours = Number(statsForDay.nbEnCours);
-      const nbResolus = Number(statsForDay.nbResolus);
-  
-      const total = nbFermes + nbEnCours + nbResolus || 1;
+      const nbFermes = Number(statsForDay.nbFermes || 0);
+      const nbEnCours = Number(statsForDay.nbEnCours || 0);
+      const nbResolus = Number(statsForDay.nbResolus || 0);
   
       return {
-        date: formattedDate,
-        nbFermes: parseFloat(((nbFermes / total) * 100).toFixed(2)),
-        nbEnCours: parseFloat(((nbEnCours / total) * 100).toFixed(2)),
-        nbResolus: parseFloat(((nbResolus / total) * 100).toFixed(2)),
+        date: dayKey,
+        nbFermes,
+        nbEnCours,
+        nbResolus,
       };
     });
   
+    // --- 6) Retour final
     return {
       resumeGlobal: {
         totalFermes,
@@ -176,7 +196,6 @@ export class TicketsService {
       parJour: result,
     };
   }
-  
   
   //3. Statut des tickets par agent
   async getStatutTicketsParAgent(query?: DateQueryDto) {

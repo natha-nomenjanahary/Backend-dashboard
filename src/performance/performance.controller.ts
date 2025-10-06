@@ -89,7 +89,7 @@ export class PerformanceController {
     return this.performanceService.calculerTempsMoyenResolutionParComplexiteParAgent(mois,annee);
   }
 
-  //9.  Tableau de forte qctivité
+  //9. 17. Tableau de forte qctivité
   @Get('forte-activite')
   async obtenirTicketsEnCoursDes10MoisPrecedents(
     @Query('mois') mois?: number,
@@ -130,14 +130,14 @@ export class PerformanceController {
   }
   
   
-  //17. Periode forte activité
-  @Get('forte-activite-point')
-  async obtenirPointsTicketsEnCoursDes10MoisPrecedents(
-    @Query('mois') mois?: number,
-    @Query('annee') annee?: number,
-  ){
-    return this.performanceService.obtenirPointsTicketsEnCoursDes10MoisPrecedents(mois,annee);
-  }
+  // //17. Periode forte activité
+  // @Get('forte-activite-point')
+  // async obtenirPointsTicketsEnCoursDes10MoisPrecedents(
+  //   @Query('mois') mois?: number,
+  //   @Query('annee') annee?: number,
+  // ){
+  //   return this.performanceService.obtenirPointsTicketsEnCoursDes10MoisPrecedents(mois,annee);
+  // }
 
   //18. Temps de resolution de tous les agnets
   @Get('temps-de-tout-le-monde')

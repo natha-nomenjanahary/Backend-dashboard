@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Agent } from './entities/Agent.entity';
 import { AgentStats } from './interfaces/agent-stats.interface';
+import { calculerHeuresOuvrees } from '../performance/utils';
+import { SousCategorieService } from '../sous-categories/sous-categories.service';
 
 @Injectable()
 export class AgentsService {
@@ -10,6 +12,7 @@ export class AgentsService {
     private readonly dataSource: DataSource,
     @InjectRepository(Agent)
     private readonly agentRepository: Repository<Agent>,
+    private readonly sousCategorieService: SousCategorieService, // <-- injection correcte
   ) {}
 
   // 1. Liste des agents avec statistique
@@ -20,81 +23,91 @@ export class AgentsService {
     const today = new Date();
     const targetMois = mois ?? today.getMonth() + 1;
     const targetAnnee = annee ?? today.getFullYear();
-
+  
     const startDate = new Date(targetAnnee, targetMois - 1, 1);
-    const isMoisActuel =
-      targetMois === today.getMonth() + 1 && targetAnnee === today.getFullYear();
-    const endDate = isMoisActuel
-      ? new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59)
-      : new Date(targetAnnee, targetMois, 0, 23, 59, 59);
-
-    const ID_ETAT_RESOLU = 3; // "Résolu"
+    const endDate =
+      targetMois === today.getMonth() + 1 && targetAnnee === today.getFullYear()
+        ? new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59)
+        : new Date(targetAnnee, targetMois, 0, 23, 59, 59);
+  
+    const ID_ETAT_RESOLU = 3;
     const ID_ETAT_NON_ATTRIBUE = 5;
-
-    // ⚡ Charger uniquement les agents + tickets du mois
+  
+    // 🔹 Récupérer tous les agents avec leurs tickets (sans filtrage date)
     const agents = await this.agentRepository
       .createQueryBuilder('agent')
-      .leftJoinAndSelect(
-        'agent.tickets',
-        'ticket',
-        'ticket.dateCreation BETWEEN :startDate AND :endDate',
-        { startDate, endDate }
-      )
+      .leftJoinAndSelect('agent.tickets', 'ticket')
       .getMany();
-
-    // ⚡ Nombre total de tickets du mois
+  
+    // 🔹 Nombre total de tickets créés dans le mois pour tous les agents
     const totalTicketsMois = await this.dataSource
       .getRepository('Ticket')
       .createQueryBuilder('ticket')
       .where('ticket.dateCreation BETWEEN :startDate AND :endDate', { startDate, endDate })
       .getCount();
-
-    return agents.map((agent) => {
+  
+    const results: AgentStats[] = [];
+  
+    for (const agent of agents) {
       const tickets = agent.tickets || [];
-
-      const totalAssignes = tickets.filter(
-        (t) => Number(t.statut) !== ID_ETAT_NON_ATTRIBUE
-      ).length;
-
-      const resolus = tickets.filter(
-        (t) =>
+  
+      // 🔹 Tickets attribués créés dans le mois
+      const ticketsAttribues = tickets.filter(
+        t =>
+          Number(t.statut) !== ID_ETAT_NON_ATTRIBUE &&
+          t.dateCreation >= startDate &&
+          t.dateCreation <= endDate
+      );
+      const totalAssignes = ticketsAttribues.length;
+  
+      // 🔹 Tickets résolus dans le mois et créés dans le mois
+      const resolus = ticketsAttribues.filter(
+        t =>
           Number(t.statut) === ID_ETAT_RESOLU &&
           t.dateResolution &&
-          new Date(t.dateResolution) >= startDate &&
-          new Date(t.dateResolution) <= endDate
+          t.dateResolution >= startDate &&
+          t.dateResolution <= endDate
       );
       const totalResolus = resolus.length;
-
       const tauxRealisation = totalAssignes > 0 ? totalResolus / totalAssignes : 0;
-
-      const resolusRapides = resolus.filter(
-        (t) =>
-          t.dateCreation &&
-          (new Date(t.dateResolution).getTime() -
-            new Date(t.dateCreation).getTime()) /
-            (1000 * 3600 * 24) <=
-            24
-      );
-
-      const tauxResolutionRapide =
-        totalResolus > 0 ? resolusRapides.length / totalResolus : 0;
+  
+      // 🔹 Résolution rapide avec complexité et heures ouvrées
+      let resolusRapidesCount = 0;
+      for (const t of resolus) {
+        if (!t.sousCategorie || !t.dateCreation || !t.dateResolution) continue;
+        const points = await this.sousCategorieService.getPointsByName(t.sousCategorie.nom);
+        const heuresOuvrees = await calculerHeuresOuvrees(
+          new Date(t.dateCreation),
+          new Date(t.dateResolution)
+        );
+  
+        if (
+          (points === 10 && heuresOuvrees <= 6) ||
+          (points === 20 && heuresOuvrees <= 18) ||
+          (points === 30 && heuresOuvrees <= 24)
+        ) {
+          resolusRapidesCount++;
+        }
+      }
+  
+      const tauxResolutionRapide = totalResolus > 0 ? resolusRapidesCount / totalResolus : 0;
       const volumeTraite = totalResolus;
-
+  
       const score =
-        tauxRealisation * 0.5 +
-        tauxResolutionRapide * 0.4 +
-        (volumeTraite / 100) * 0.1;
-
-      return {
+        tauxRealisation * 0.5 + tauxResolutionRapide * 0.4 + (volumeTraite / 100) * 0.1;
+  
+      results.push({
         id: agent.idAgent,
         nom: `${agent.prenom} ${agent.nom}`,
         poste: agent.poste,
         ticketsRepartis: `${totalAssignes}/${totalTicketsMois}`,
         performance: Math.round(score * 5),
-      };
-    });
+      });
+    }
+  
+    return results;
   }
-
+  
   // 2. Info sur un agent
   async getInfoAgentParId(
     idAgent: number,
@@ -160,23 +173,30 @@ export class AgentsService {
 
     const tauxRealisation = totalAssignes > 0 ? totalResolus / totalAssignes : 0;
 
-    const resolusRapides = resolus.filter(
-      (t) =>
-        t.dateCreation &&
-        (new Date(t.dateResolution).getTime() -
-          new Date(t.dateCreation).getTime()) /
-          (1000 * 3600 * 24) <=
-          1
-    );
+    let resolusRapidesCount = 0;
+      for (const t of resolus) {
+        if (!t.sousCategorie || !t.dateCreation || !t.dateResolution) continue;
+        const points = await this.sousCategorieService.getPointsByName(t.sousCategorie.nom);
+        const heuresOuvrees = await calculerHeuresOuvrees(
+          new Date(t.dateCreation),
+          new Date(t.dateResolution)
+        );
 
-    const tauxResolutionRapide =
-      totalResolus > 0 ? resolusRapides.length / totalResolus : 0;
-    const volumeTraite = totalResolus;
+        if ((points === 10 && heuresOuvrees <= 6) ||
+            (points === 20 && heuresOuvrees <= 18) ||
+            (points === 30 && heuresOuvrees <= 24)) {
+          resolusRapidesCount++;
+        }
+      }
 
-    const score =
-      tauxRealisation * 0.5 +
-      tauxResolutionRapide * 0.3 +
-      (volumeTraite / 100) * 0.2;
+      const tauxResolutionRapide = totalResolus > 0 ? resolusRapidesCount / totalResolus : 0;
+      const volumeTraite = totalResolus;
+
+      const score =
+        tauxRealisation * 0.5 +
+        tauxResolutionRapide * 0.4 +
+        (volumeTraite / 100) * 0.1;
+
 
     return {
       score: Math.round(score * 5),

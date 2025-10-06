@@ -43,51 +43,75 @@ private msToHeureMinute(ms: number): string {
     const today = new Date();
     const targetMois = mois ?? today.getMonth() + 1;
     const targetAnnee = annee ?? today.getFullYear();
-
+  
     const startDate = new Date(targetAnnee, targetMois - 1, 1);
     const isMoisActuel =
       targetMois === today.getMonth() + 1 &&
       targetAnnee === today.getFullYear();
-
+  
     const endDate = isMoisActuel
       ? new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59)
       : new Date(targetAnnee, targetMois, 0, 23, 59, 59);
-
+  
     const agents = await this.agentService.getAllAgents();
-
+  
+    // Récupérer tous les tickets dans l'intervalle (comme avant)
     const tickets = await this.ticketService.getTicketsDesAgentsDansIntervalle(startDate, endDate);
-
+  
+    // Ne garder que les tickets attribués (agentId défini)
+    const ticketsAttribues = tickets.filter(
+      t => t.agentId !== null && t.agentId !== undefined,
+    );
+  
+    // Compter les tickets par agent (en forçant les clefs numériques)
     const countMap = new Map<number, number>();
-
-    for (const ticket of tickets) {
-      const agentId = ticket.agentId;
-      if (agentId) {
-        countMap.set(agentId, (countMap.get(agentId) || 0) + 1);
-      }
+    for (const ticket of ticketsAttribues) {
+      const rawId = ticket.agentId;
+      const id = Number(rawId);
+      if (Number.isNaN(id)) continue;
+  
+      countMap.set(id, (countMap.get(id) || 0) + 1);
     }
-
-    const totalTickets = tickets.length || 1;
-
+  
+    // total réel des tickets attribués (la somme des valeurs de countMap)
+    const totalAssignedTickets = Array.from(countMap.values()).reduce((s, v) => s + v, 0);
+  
+    // Si aucun ticket attribué, retourner tous les agents avec 0 (éviter division par 0)
+    if (totalAssignedTickets === 0) {
+      return agents.map(agent => ({
+        agentId: agent.idAgent,
+        name: `${agent.nom} ${agent.prenom}`,
+        tickets: 0,
+        totalTickets: 0,
+        pourcentage: 0,
+      }));
+    }
+  
+    // Construire la réponse en utilisant totalAssignedTickets comme dénominateur
     return agents.map(agent => {
-      const count = countMap.get(agent.idAgent) || 0;
-      const pourcentage = parseFloat(((count / totalTickets) * 100).toFixed(2));
-
+      const id = Number(agent.idAgent);
+      const count = countMap.get(id) || 0;
+      const pourcentage = parseFloat(((count / totalAssignedTickets) * 100).toFixed(2));
+  
       return {
         agentId: agent.idAgent,
         name: `${agent.nom} ${agent.prenom}`,
         tickets: count,
-        totalTickets: totalTickets,
+        totalTickets: totalAssignedTickets,
         pourcentage,
       };
     });
   }
-
+  
   // 2. Taux de résolution des tickets par mois
-  async calculerTauxResolutionMensuel(mois?: number, annee?: number): Promise<{
+  async calculerTauxResolutionMensuel(
+    mois?: number,
+    annee?: number,
+  ): Promise<{
     totalTicketsRepartis: number;
     totalTicketsResolus: number;
     tauxResolution: number;
-    repartition : {
+    repartition: {
       NbFacile: number;
       NbMoyen: number;
       NbDifficile: number;
@@ -99,56 +123,73 @@ private msToHeureMinute(ms: number): string {
   
     const targetYear = annee ?? currentYear;
     const targetMonth = mois ?? currentMonth;
-    const startDate = new Date(targetYear, targetMonth - 1, 1);
-    let endDate: Date;
-    if (targetYear === currentYear && targetMonth === currentMonth) {
-      endDate = new Date(targetYear, targetMonth - 1, today.getDate() - 1, 23, 59, 59, 999);
-    } else {
-      endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
-    }
   
+    const startDate = new Date(targetYear, targetMonth - 1, 1);
+    const endDate =
+      targetYear === currentYear && targetMonth === currentMonth
+        ? new Date(targetYear, targetMonth - 1, today.getDate() - 1, 23, 59, 59, 999)
+        : new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
+  
+    // 🔹 Tous les tickets attribués créés dans le mois
     const tickets = await this.ticketRepository
-      .createQueryBuilder('ticket')      
-      .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie') 
-      .where('ticket.date_create BETWEEN :start AND :end', { start: startDate, end: endDate })
-      .andWhere('ticket.technician IS NOT NULL')
+      .createQueryBuilder('ticket')
+      .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
+      .where('ticket.technicien IS NOT NULL')
+      .andWhere('ticket.date_create BETWEEN :start AND :end', { start: startDate, end: endDate })
       .getMany();
   
-    const totalRepartis = tickets.length;
-    const totalResolus = tickets.filter(t => t.statut === 3).length;
-    const ticketsResolus = tickets.filter(t => t.statut === 3);
-    const taux = totalRepartis > 0 ? parseFloat(((totalResolus / totalRepartis) * 100).toFixed(2)) : 0;
-    
-    const repartition = {
-        NbFacile: 0,
-        NbMoyen: 0,
-        NbDifficile: 0,
-      };
-    
-      for (const ticket of ticketsResolus) {
-            const sousCategorieNom = ticket.sousCategorie?.nom;
-            const points = await this.sousCategorieService.getPointsByName(sousCategorieNom);
-            const pointsNum = Number(points);
-            if (pointsNum === 10) repartition.NbFacile++;
-            else if (pointsNum === 20) repartition.NbMoyen++;
-            else if (pointsNum === 30) repartition.NbDifficile++;
+    const totalTicketsRepartis = tickets.length;
+  
+    // 🔹 Tickets résolus DANS LE MOIS et créés DANS LE MOIS
+    const ticketsResolus = tickets.filter(
+      t => t.statut === 3 && t.dateResolution >= startDate && t.dateResolution <= endDate,
+    );
+    const totalTicketsResolus = ticketsResolus.length;
+  
+    // Répartition des tickets résolus par complexité
+    const repartitionCounts = { NbFacile: 0, NbMoyen: 0, NbDifficile: 0 };
+    const cachePoints = new Map<string, number>();
+  
+    for (const ticket of ticketsResolus) {
+      const sousCategorieNom = ticket.sousCategorie?.nom;
+      if (!sousCategorieNom) continue;
+  
+      let points: number;
+      if (cachePoints.has(sousCategorieNom)) {
+        points = cachePoints.get(sousCategorieNom)!;
+      } else {
+        points = await this.sousCategorieService.getPointsByName(sousCategorieNom);
+        cachePoints.set(sousCategorieNom, points);
       }
-    const facile = totalResolus > 0 ? parseFloat(((repartition.NbFacile / totalResolus) * 5).toFixed(2)) : 0;
-    const moyen = totalResolus > 0 ? parseFloat(((repartition.NbMoyen / totalResolus) * 5).toFixed(2)) : 0;
-    const difficile = totalResolus > 0 ? parseFloat(((repartition.NbDifficile / totalResolus) * 5).toFixed(2)) : 0;
-       
-
+  
+      const p = Number(points);
+      if (p === 10) repartitionCounts.NbFacile++;
+      else if (p === 20) repartitionCounts.NbMoyen++;
+      else if (p === 30) repartitionCounts.NbDifficile++;
+    }
+  
+    const tauxResolution =
+      totalTicketsRepartis > 0 ? parseFloat(((totalTicketsResolus / totalTicketsRepartis) * 100).toFixed(2)) : 0;
+  
+    const facile =
+      totalTicketsRepartis > 0 ? parseFloat(((repartitionCounts.NbFacile / totalTicketsRepartis) * 5).toFixed(2)) : 0;
+    const moyen =
+      totalTicketsRepartis > 0 ? parseFloat(((repartitionCounts.NbMoyen / totalTicketsRepartis) * 5).toFixed(2)) : 0;
+    const difficile =
+      totalTicketsRepartis > 0 ? parseFloat(((repartitionCounts.NbDifficile / totalTicketsRepartis) * 5).toFixed(2)) : 0;
+  
     return {
-      totalTicketsRepartis: totalRepartis,
-      totalTicketsResolus: totalResolus,
-      tauxResolution: taux,
-      repartition : {
+      totalTicketsRepartis: totalTicketsRepartis,
+      totalTicketsResolus: totalTicketsResolus,
+      tauxResolution: tauxResolution,
+      repartition: {
         NbFacile: facile,
         NbMoyen: moyen,
         NbDifficile: difficile,
-      }
+      },
     };
   }
+  
   
   //3.Info sur ces tickets(F,M, D) par chaque agent
   async calculerResolutionParAgentParMois(mois?: number, annee?: number): Promise<
@@ -343,72 +384,78 @@ private msToHeureMinute(ms: number): string {
     ticketDifficile: number;
     total: number;
   }[]
-  >{
-    const resultats: {
-      mois: string;
-      ticketFacile: number;
-      ticketMoyen: number;
-      ticketDifficile: number;
-      total: number;
-    }[] = [];
+>{
+  const resultats: {
+    mois: string;
+    ticketFacile: number;
+    ticketMoyen: number;
+    ticketDifficile: number;
+    total: number;
+  }[] = [];
 
-    const today = new Date();
-    const currentMonth = mois ?? today.getMonth() + 1;
-    const currentYear = annee ?? today.getFullYear();
+  const today = new Date();
+  const currentMonth = mois ?? today.getMonth() + 1;
+  const currentYear = annee ?? today.getFullYear();
 
-    const moisFrancais = [
-      'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
-      'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'
-    ];
+  const moisFrancais = [
+    'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+    'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'
+  ];
 
-    const cachePoints = new Map<string, number>();
-    for (let i = 9; i >= 0; i--) {
-      const dateRef = new Date(currentYear, currentMonth - 1 - i, 1);
-      const moisRef = dateRef.getMonth(); // 0-11
-      const anneeRef = dateRef.getFullYear();
+  const cachePoints = new Map<string, number>();
 
-      const debut = new Date(anneeRef, moisRef, 1);
-      const fin = new Date(anneeRef, moisRef + 1, 0, 23, 59, 59, 999);
+  // date de base : premier jour du mois courant (ou du mois passé en param)
+  const base = new Date(currentYear, currentMonth - 1, 1);
 
-      const tickets = await this.ticketRepository
-        .createQueryBuilder('ticket')
-        .where('ticket.state = :state', { state: 2 }) // En cours
-        .andWhere('ticket.date_create BETWEEN :start AND :end', { start: debut, end: fin })
-        .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
-        .getMany();
+  for (let i = 9; i >= 0; i--) {
+    // on crée une date à partir de la base en soustrayant i mois (robuste pour changement d'année)
+    const dateRef = new Date(base.getFullYear(), base.getMonth() - i, 1);
+    const moisRef = dateRef.getMonth(); // 0-11
+    const anneeRef = dateRef.getFullYear();
 
-      let facile = 0, moyen = 0, difficile = 0;
+    const debut = new Date(anneeRef, moisRef, 1, 0, 0, 0, 0);
+    const fin = new Date(anneeRef, moisRef + 1, 0, 23, 59, 59, 999);
 
-      for (const ticket of tickets) {
-        const sousCategorie = ticket.sousCategorie;
-        if (!sousCategorie) continue;
+    const tickets = await this.ticketRepository
+      .createQueryBuilder('ticket')
+      .where('ticket.state = :state', { state: 3 }) // En cours
+      .andWhere('ticket.date_res BETWEEN :start AND :end', { start: debut, end: fin })
+      .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
+      .getMany();
 
-        const nom = sousCategorie.nom;
+    let facile = 0, moyen = 0, difficile = 0;
 
-        let points: number;
-        if (cachePoints.has(nom)) {
-          points = cachePoints.get(nom)!;
-        } else {
-          points = await this.sousCategorieService.getPointsByName(nom);
-          cachePoints.set(nom, points);
-        }
+    for (const ticket of tickets) {
+      const sousCategorie = ticket.sousCategorie;
+      if (!sousCategorie) continue;
 
-        if (points === 10) facile++;
-        else if (points === 20) moyen++;
-        else if (points === 30) difficile++;
+      const nom = sousCategorie.nom;
+
+      let points: number;
+      if (cachePoints.has(nom)) {
+        points = cachePoints.get(nom)!;
+      } else {
+        points = await this.sousCategorieService.getPointsByName(nom);
+        cachePoints.set(nom, points);
       }
 
-      resultats.push({
-        mois: `${moisFrancais[moisRef]} ${anneeRef}`,
-        ticketFacile: facile,
-        ticketMoyen: moyen,
-        ticketDifficile: difficile,
-        total: facile + moyen + difficile,
-      });
+      if (points === 10) facile++;
+      else if (points === 20) moyen++;
+      else if (points === 30) difficile++;
     }
 
-    return resultats;
+    resultats.push({
+      mois: `${moisFrancais[moisRef]} ${anneeRef}`,
+      ticketFacile: facile,
+      ticketMoyen: moyen,
+      ticketDifficile: difficile,
+      total: facile + moyen + difficile,
+    });
   }
+
+  return resultats;
+}
+
 
   //8. repartition par mois des tickets pour voir le temps de realisation(FACILE)
   async calculerTempsMoyenParSemaineParComplexitePourAgent(
@@ -640,81 +687,81 @@ private msToHeureMinute(ms: number): string {
   }
   
   //15.Periode de forte activité point
-  async obtenirPointsTicketsEnCoursDes10MoisPrecedents(mois?: number, annee?: number): Promise<
-  {
-    mois: string;
-    ticketFacile: number;
-    ticketMoyen: number;
-    ticketDifficile: number;
-    total: number;
-  }[]
-  >{
-    const resultats: {
-      mois: string;
-      ticketFacile: number;
-      ticketMoyen: number;
-      ticketDifficile: number;
-      total: number;
-    }[] = [];
+  // async obtenirPointsTicketsEnCoursDes10MoisPrecedents(mois?: number, annee?: number): Promise<
+  // {
+  //   mois: string;
+  //   ticketFacile: number;
+  //   ticketMoyen: number;
+  //   ticketDifficile: number;
+  //   total: number;
+  // }[]
+  // >{
+  //   const resultats: {
+  //     mois: string;
+  //     ticketFacile: number;
+  //     ticketMoyen: number;
+  //     ticketDifficile: number;
+  //     total: number;
+  //   }[] = [];
 
-    const today = new Date();
-    const currentMonth = mois ?? today.getMonth() + 1;
-    const currentYear = annee ?? today.getFullYear();
+  //   const today = new Date();
+  //   const currentMonth = mois ?? today.getMonth() + 1;
+  //   const currentYear = annee ?? today.getFullYear();
 
-    const moisFrancais = [
-      'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
-      'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'
-    ];
+  //   const moisFrancais = [
+  //     'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+  //     'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'
+  //   ];
 
-    const cachePoints = new Map<string, number>();
+  //   const cachePoints = new Map<string, number>();
 
-    for (let i = 9; i >= 0; i--) {
-      const dateRef = new Date(currentYear, currentMonth - 1 - i, 1);
-      const moisRef = dateRef.getMonth(); // 0-11
-      const anneeRef = dateRef.getFullYear();
+  //   for (let i = 9; i >= 0; i--) {
+  //     const dateRef = new Date(currentYear, currentMonth - 1 - i, 1);
+  //     const moisRef = dateRef.getMonth(); // 0-11
+  //     const anneeRef = dateRef.getFullYear();
 
-      const debut = new Date(anneeRef, moisRef, 1);
-      const fin = new Date(anneeRef, moisRef + 1, 0, 23, 59, 59, 999);
+  //     const debut = new Date(anneeRef, moisRef, 1);
+  //     const fin = new Date(anneeRef, moisRef + 1, 0, 23, 59, 59, 999);
 
-      const tickets = await this.ticketRepository
-        .createQueryBuilder('ticket')
-        .where('ticket.state = :state', { state: 2 }) // En cours
-        .andWhere('ticket.date_create BETWEEN :start AND :end', { start: debut, end: fin })
-        .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
-        .getMany();
+  //     const tickets = await this.ticketRepository
+  //       .createQueryBuilder('ticket')
+  //       .where('ticket.state = :state', { state: 2 }) // En cours
+  //       .andWhere('ticket.date_create BETWEEN :start AND :end', { start: debut, end: fin })
+  //       .leftJoinAndSelect('ticket.sousCategorie', 'sousCategorie')
+  //       .getMany();
 
-      let pointsFacile = 0, pointsMoyen = 0, pointsDifficile = 0;
+  //     let pointsFacile = 0, pointsMoyen = 0, pointsDifficile = 0;
 
-      for (const ticket of tickets) {
-        const sousCategorie = ticket.sousCategorie;
-        if (!sousCategorie) continue;
+  //     for (const ticket of tickets) {
+  //       const sousCategorie = ticket.sousCategorie;
+  //       if (!sousCategorie) continue;
 
-        const nom = sousCategorie.nom;
+  //       const nom = sousCategorie.nom;
 
-        let points: number;
-        if (cachePoints.has(nom)) {
-          points = cachePoints.get(nom)!;
-        } else {
-          points = await this.sousCategorieService.getPointsByName(nom);
-          cachePoints.set(nom, points);
-        }
+  //       let points: number;
+  //       if (cachePoints.has(nom)) {
+  //         points = cachePoints.get(nom)!;
+  //       } else {
+  //         points = await this.sousCategorieService.getPointsByName(nom);
+  //         cachePoints.set(nom, points);
+  //       }
 
-        if (points === 10) pointsFacile += 10;
-        else if (points === 20) pointsMoyen += 20;
-        else if (points === 30) pointsDifficile += 30;
-      }
+  //       if (points === 10) pointsFacile += 10;
+  //       else if (points === 20) pointsMoyen += 20;
+  //       else if (points === 30) pointsDifficile += 30;
+  //     }
 
-      resultats.push({
-        mois: `${moisFrancais[moisRef]} ${anneeRef}`,
-        ticketFacile: pointsFacile,
-        ticketMoyen: pointsMoyen,
-        ticketDifficile: pointsDifficile,
-        total: pointsFacile + pointsMoyen + pointsDifficile,
-      });
-    }
+  //     resultats.push({
+  //       mois: `${moisFrancais[moisRef]} ${anneeRef}`,
+  //       ticketFacile: pointsFacile,
+  //       ticketMoyen: pointsMoyen,
+  //       ticketDifficile: pointsDifficile,
+  //       total: pointsFacile + pointsMoyen + pointsDifficile,
+  //     });
+  //   }
 
-    return resultats;
-  }
+  //   return resultats;
+  // }
 
   //16.Temps de resolution de tous les agents
   async getTempsMoyenResolutionParComplexiteEtAgent(mois?: number, annee?: number) {
@@ -850,7 +897,6 @@ private msToHeureMinute(ms: number): string {
   
     let meilleurGlobal = { id: -1, nom: '', prenom: '', score: -1 };
   
-    // Fonction utilitaire : chercher tickets d'une complexité sur le dernier mois disponible
     const chercherDernierMoisDisponible = async (complexite: 'facile' | 'moyen' | 'difficile') => {
       let mois = targetMois;
       let annee = targetAnnee;
@@ -917,23 +963,32 @@ private msToHeureMinute(ms: number): string {
           const tickets = ticketsParComplexite[type];
           if (tickets.length === 0) continue;
   
-          const totalAssignes = tickets.length;
           const totalResolus = tickets.length;
+          let resolusRapidesCount = 0;
   
-          const resolusRapides = tickets.filter(t => {
-            const d1 = new Date(t.dateCreation).getTime();
-            const d2 = new Date(t.dateResolution).getTime();
-            return (d2 - d1) / (1000 * 3600 * 24) <= 1;
-          }).length;
+          for (const t of tickets) {
+            if (!t.sousCategorie || !t.dateCreation || !t.dateResolution) continue;
+            const points = await this.sousCategorieService.getPointsByName(t.sousCategorie.nom);
+            const heuresOuvrees = await calculerHeuresOuvrees(
+              new Date(t.dateCreation),
+              new Date(t.dateResolution)
+            );
   
-          const tauxRealisation = totalAssignes > 0 ? totalResolus / totalAssignes : 0;
-          const tauxResolutionRapide = totalResolus > 0 ? resolusRapides / totalResolus : 0;
+            if (
+              (points === 10 && heuresOuvrees <= 6) ||
+              (points === 20 && heuresOuvrees <= 18) ||
+              (points === 30 && heuresOuvrees <= 24)
+            ) {
+              resolusRapidesCount++;
+            }
+          }
+  
+          const tauxRealisation = totalResolus > 0 ? totalResolus / totalResolus : 1; // toujours 1
+          const tauxResolutionRapide = totalResolus > 0 ? resolusRapidesCount / totalResolus : 0;
           const volumeTraite = totalResolus;
   
           const score =
-            tauxRealisation * 0.5 +
-            tauxResolutionRapide * 0.3 +
-            (volumeTraite / 100) * 0.2;
+            tauxRealisation * 0.5 + tauxResolutionRapide * 0.4 + (volumeTraite / 100) * 0.1;
   
           scoreGlobal += score;
   
@@ -958,7 +1013,10 @@ private msToHeureMinute(ms: number): string {
         }
       }
     };
-   await calculerClassement(targetMois, targetAnnee);
+  
+    await calculerClassement(targetMois, targetAnnee);
+  
+    // Gestion des mois précédents pour complexités sans tickets
     for (const type of ['facile', 'moyen', 'difficile'] as const) {
       if (!lastMonthWithTickets[type]) {
         const result = await chercherDernierMoisDisponible(type);
@@ -980,22 +1038,32 @@ private msToHeureMinute(ms: number): string {
             const tickets = ticketsParComplexite[type];
             if (tickets.length === 0) continue;
   
-            const totalAssignes = tickets.length;
             const totalResolus = tickets.length;
-            const resolusRapides = tickets.filter(t => {
-              const d1 = new Date(t.dateCreation).getTime();
-              const d2 = new Date(t.dateResolution).getTime();
-              return (d2 - d1) / (1000 * 3600 * 24) <= 1;
-            }).length;
+            let resolusRapidesCount = 0;
   
-            const tauxRealisation = totalAssignes > 0 ? totalResolus / totalAssignes : 0;
-            const tauxResolutionRapide = totalResolus > 0 ? resolusRapides / totalResolus : 0;
+            for (const t of tickets) {
+              if (!t.sousCategorie || !t.dateCreation || !t.dateResolution) continue;
+              const points = await this.sousCategorieService.getPointsByName(t.sousCategorie.nom);
+              const heuresOuvrees = await calculerHeuresOuvrees(
+                new Date(t.dateCreation),
+                new Date(t.dateResolution)
+              );
+  
+              if (
+                (points === 10 && heuresOuvrees <= 6) ||
+                (points === 20 && heuresOuvrees <= 18) ||
+                (points === 30 && heuresOuvrees <= 24)
+              ) {
+                resolusRapidesCount++;
+              }
+            }
+  
+            const tauxRealisation = totalResolus > 0 ? totalResolus / totalResolus : 1;
+            const tauxResolutionRapide = totalResolus > 0 ? resolusRapidesCount / totalResolus : 0;
             const volumeTraite = totalResolus;
   
             const score =
-              tauxRealisation * 0.5 +
-              tauxResolutionRapide * 0.3 +
-              (volumeTraite / 100) * 0.2;
+              tauxRealisation * 0.5 + tauxResolutionRapide * 0.4 + (volumeTraite / 100) * 0.1;
   
             if (score > complexityScores[type].score) {
               complexityScores[type] = {
